@@ -17,6 +17,7 @@ const TICKET_CATEGORY_ID = '1434722990054051957';
 const PANEL_CHANNEL_ID = '1434722989571575984';
 const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
 
+// Load or create tickets.json
 let ticketsData;
 if (fs.existsSync('./tickets.json')) {
     ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
@@ -79,48 +80,55 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
     if (interaction.customId !== 'ticket_type_select') return;
 
-    const member = interaction.user;
-    const ticketType = interaction.values[0];
+    try {
+        const member = interaction.user;
+        const ticketType = interaction.values[0];
 
-    ticketsData.lastTicket++;
-    fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
-    const ticketNumber = ticketsData.lastTicket;
+        ticketsData.lastTicket++;
+        fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
+        const ticketNumber = ticketsData.lastTicket;
 
-    // Create ticket channel first
-    const ticketChannel = await interaction.guild.channels.create({
-        name: `Ticket-${ticketNumber}`,
-        type: ChannelType.GuildText,
-        parent: TICKET_CATEGORY_ID,
-        permissionOverwrites: [
-            { id: interaction.guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
-            { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-        ]
-    });
+        // Create ticket channel
+        const ticketChannel = await interaction.guild.channels.create({
+            name: `Ticket-${ticketNumber}`,
+            type: ChannelType.GuildText,
+            parent: TICKET_CATEGORY_ID,
+            permissionOverwrites: [
+                { id: interaction.guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+                { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+                { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+            ]
+        });
 
-    // Show modal for ticket info
-    const modal = new ModalBuilder()
-        .setCustomId(`ticket_modal_${ticketNumber}`)
-        .setTitle('Ticket Info');
+        // Show modal for ticket info
+        const modal = new ModalBuilder()
+            .setCustomId(`ticket_modal_${ticketNumber}`)
+            .setTitle('Ticket Info');
 
-    const ignInput = new TextInputBuilder()
-        .setCustomId('ign_input')
-        .setLabel('Your IGN')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
+        const ignInput = new TextInputBuilder()
+            .setCustomId('ign_input')
+            .setLabel('Your IGN')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
 
-    const issueInput = new TextInputBuilder()
-        .setCustomId('issue_input')
-        .setLabel('Describe your Issue')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
+        const issueInput = new TextInputBuilder()
+            .setCustomId('issue_input')
+            .setLabel('Describe your Issue')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true);
 
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(ignInput),
-        new ActionRowBuilder().addComponents(issueInput)
-    );
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(ignInput),
+            new ActionRowBuilder().addComponents(issueInput)
+        );
 
-    await interaction.showModal(modal);
+        await interaction.showModal(modal);
+    } catch (error) {
+        console.error('[ERROR] Dropdown interaction failed:', error);
+        if (!interaction.replied) {
+            await interaction.reply({ content: 'An error occurred. Please try again.', ephemeral: true });
+        }
+    }
 });
 
 // HANDLE MODAL SUBMIT
@@ -128,33 +136,53 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.isModalSubmit()) return;
     if (!interaction.customId.startsWith('ticket_modal_')) return;
 
-    const member = interaction.user;
-    const ign = interaction.fields.getTextInputValue('ign_input');
-    const issue = interaction.fields.getTextInputValue('issue_input');
+    try {
+        const member = interaction.user;
+        const ticketNumber = interaction.customId.split('_')[2];
 
-    const ticketNumber = interaction.customId.split('_')[2];
-    const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
-    if (!ticketChannel) return;
+        // Get the ticket channel
+        const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
+        if (!ticketChannel) {
+            console.log(`[ERROR] Ticket channel not found for Ticket-${ticketNumber}`);
+            return interaction.reply({ content: 'Error: Ticket channel not found!', ephemeral: true });
+        }
 
-    const closeButton = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('close_ticket')
-            .setLabel('Close Ticket')
-            .setStyle(ButtonStyle.Danger)
-            .setEmoji('🔒')
-    );
+        // Get modal inputs
+        const ign = interaction.fields.getTextInputValue('ign_input');
+        const issue = interaction.fields.getTextInputValue('issue_input');
 
-    const embed = new EmbedBuilder()
-        .setTitle(`🎫 Ticket-${ticketNumber}`)
-        .setDescription(`<@${member.id}> Thank you for contacting support, a staff member will be with you soon.`)
-        .addFields(
-            { name: 'IGN', value: ign },
-            { name: 'Issue', value: issue }
-        )
-        .setColor('#00FFFF');
+        // Close button
+        const closeButton = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('close_ticket')
+                .setLabel('Close Ticket')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('🔒')
+        );
 
-    await ticketChannel.send({ embeds: [embed], components: [closeButton] });
-    await interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+        // Embed for ticket
+        const embed = new EmbedBuilder()
+            .setTitle(`🎫 Ticket-${ticketNumber}`)
+            .setDescription(`<@${member.id}> Thank you for contacting support, a staff member will be with you soon.`)
+            .addFields(
+                { name: 'IGN', value: ign },
+                { name: 'Issue', value: issue }
+            )
+            .setColor('#00FFFF');
+
+        // Send embed to ticket channel
+        await ticketChannel.send({ embeds: [embed], components: [closeButton] });
+
+        // Reply to user to acknowledge the modal
+        await interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+        console.log(`[INFO] Ticket-${ticketNumber} created by ${member.tag}`);
+        
+    } catch (error) {
+        console.error('[ERROR] Modal submit failed:', error);
+        if (!interaction.replied) {
+            await interaction.reply({ content: 'An error occurred while creating your ticket. Please try again.', ephemeral: true });
+        }
+    }
 });
 
 // CLOSE BUTTON
