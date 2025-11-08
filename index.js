@@ -1,8 +1,9 @@
 require('dotenv').config();
 const fs = require('fs');
-const { 
+const {
     Client, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-    ChannelType, PermissionsBitField, EmbedBuilder, Collection, StringSelectMenuBuilder
+    ChannelType, PermissionsBitField, EmbedBuilder, Collection, StringSelectMenuBuilder,
+    ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 
 const client = new Client({
@@ -14,9 +15,9 @@ const client = new Client({
 const STAFF_ROLE_ID = '1434722988602822762';
 const TICKET_CATEGORY_ID = '1434722990054051957';
 const PANEL_CHANNEL_ID = '1434722989571575984';
+const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
 
 let ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
-const activeCollectors = new Collection();
 
 // READY EVENT
 client.once('ready', async () => {
@@ -67,20 +68,21 @@ client.on('messageCreate', async message => {
     }
 });
 
-// HANDLE TICKET CREATION
+// HANDLE TICKET CREATION FROM DROPDOWN
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
 
-    // TICKET TYPE SELECT
     if (interaction.customId === 'ticket_type_select') {
         const member = interaction.user;
         const ticketType = interaction.values[0];
 
+        // Increment ticket number
         ticketsData.lastTicket++;
         fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
         const ticketNumber = ticketsData.lastTicket;
         const ticketName = `Ticket-${ticketNumber}`;
 
+        // Create ticket channel
         const ticketChannel = await interaction.guild.channels.create({
             name: ticketName,
             type: ChannelType.GuildText,
@@ -92,74 +94,97 @@ client.on('interactionCreate', async interaction => {
             ]
         });
 
-        // Close dropdown at top
-        const closeMenu = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('ticket_actions')
-                .setPlaceholder('Ticket Actions')
-                .addOptions([
-                    { label: 'Close Ticket', value: 'close_ticket', emoji: '🔒' }
-                ])
+        // Show modal to collect ticket info
+        const modal = new ModalBuilder()
+            .setCustomId(`ticket_modal_${ticketNumber}`)
+            .setTitle('Ticket Info');
+
+        const ignInput = new TextInputBuilder()
+            .setCustomId('ign_input')
+            .setLabel('Your IGN')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true);
+
+        const issueInput = new TextInputBuilder()
+            .setCustomId('issue_input')
+            .setLabel('Describe your Issue')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(ignInput),
+            new ActionRowBuilder().addComponents(issueInput)
         );
 
-        const welcomeEmbed = new EmbedBuilder()
-            .setTitle(`${ticketName} Opened`)
-            .setDescription(`<@${member.id}> Thank you for contacting support, a staff member will be with you soon.`)
-            .setColor('#00FFFF');
+        await interaction.showModal(modal);
+    }
+});
 
-        await ticketChannel.send({ embeds: [welcomeEmbed], components: [closeMenu] });
-        await interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+// HANDLE MODAL SUBMIT
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isModalSubmit()) return;
+    if (!interaction.customId.startsWith('ticket_modal_')) return;
 
-        // QUESTIONS
-        const questions = ['What is your IGN?', 'What is your Issue?'];
-        const answers = [];
-        ticketChannel.send({ content: `<@${member.id}> Please answer the following questions:` });
+    const member = interaction.user;
+    const ign = interaction.fields.getTextInputValue('ign_input');
+    const issue = interaction.fields.getTextInputValue('issue_input');
 
-        const filter = m => m.author.id === member.id;
-        const collector = ticketChannel.createMessageCollector({ filter, max: questions.length, time: 600000 });
-        let questionIndex = 0;
-        ticketChannel.send(questions[questionIndex]);
+    const ticketNumber = interaction.customId.split('_')[2];
+    const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
+    if (!ticketChannel) return;
 
-        collector.on('collect', async msg => {
-            answers.push(msg.content);
-            questionIndex++;
-            if (questionIndex < questions.length) {
-                ticketChannel.send(questions[questionIndex]);
-            } else {
-                const infoEmbed = new EmbedBuilder()
-                    .setTitle(`🎫 ${ticketName}`)
-                    .setDescription(`<@${member.id}>`)
-                    .addFields(
-                        { name: 'IGN', value: answers[0] },
-                        { name: 'Issue', value: answers[1] },
-                        { name: 'Ticket Type', value: ticketType.replace(/_/g,' ') }
-                    )
-                    .setColor('#00FFFF');
+    // Close button
+    const closeButton = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('close_ticket')
+            .setLabel('Close Ticket')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('🔒')
+    );
 
-                await ticketChannel.send({ embeds: [infoEmbed] });
-                collector.stop();
-            }
-        });
+    const embed = new EmbedBuilder()
+        .setTitle(`🎫 Ticket-${ticketNumber}`)
+        .setDescription(`<@${member.id}> Thank you for contacting support, a staff member will be with you soon.`)
+        .addFields(
+            { name: 'IGN', value: ign },
+            { name: 'Issue', value: issue }
+        )
+        .setColor('#00FFFF');
+
+    await ticketChannel.send({ embeds: [embed], components: [closeButton] });
+    await interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+});
+
+// CLOSE BUTTON
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
+    if (interaction.customId !== 'close_ticket') return;
+
+    const ticketChannel = interaction.channel;
+    const staffMember = interaction.user;
+
+    await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
+
+    // DM ticket opener
+    const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
+    if (ticketCreator) {
+        const closedEmbed = new EmbedBuilder()
+            .setTitle('🔒 Your Ticket Was Closed')
+            .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
+            .setColor('#FF0000');
+        try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
     }
 
-    // CLOSE TICKET DROPDOWN
-    if (interaction.customId === 'ticket_actions' && interaction.values[0] === 'close_ticket') {
-        const ticketChannel = interaction.channel;
-        const staffMember = interaction.user;
-        await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
+    // Transcript
+    const messages = await ticketChannel.messages.fetch({ limit: 100 });
+    const transcript = messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n');
 
-        const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
-        if (ticketCreator) {
-            const closedEmbed = new EmbedBuilder()
-                .setTitle('🔒 Your Ticket Was Closed')
-                .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}** • Server: Coralises Network | OCE • Closed by ${staffMember.tag}\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
-                .setColor('#FF0000');
-
-            try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
-        }
-
-        await ticketChannel.delete().catch(() => {});
+    const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+    if (transcriptChannel) {
+        transcriptChannel.send({ content: `Transcript for **${ticketChannel.name}**:\n\`\`\`${transcript}\`\`\`` });
     }
+
+    await ticketChannel.delete().catch(() => {});
 });
 
 // /ADD COMMAND
