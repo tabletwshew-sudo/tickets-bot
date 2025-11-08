@@ -102,7 +102,7 @@ client.on('interactionCreate', async interaction => {
 
         // Show modal for ticket info
         const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${ticketNumber}_${ticketChannel.id}`)
+            .setCustomId(`ticket_modal|${ticketNumber}|${ticketChannel.id}`) // pass channel ID
             .setTitle('Ticket Info');
 
         const ignInput = new TextInputBuilder()
@@ -132,14 +132,14 @@ client.on('interactionCreate', async interaction => {
 // HANDLE MODAL SUBMIT
 client.on('interactionCreate', async interaction => {
     if (!interaction.isModalSubmit()) return;
-    if (!interaction.customId.startsWith('ticket_modal_')) return;
+    if (!interaction.customId.startsWith('ticket_modal|')) return;
 
     try {
         await interaction.deferReply({ ephemeral: true });
 
         const member = interaction.user;
-        const [ticketNumber, ticketChannelId] = interaction.customId.split('_').slice(2);
-        const ticketChannel = await interaction.guild.channels.fetch(ticketChannelId);
+        const [, ticketNumber, ticketChannelId] = interaction.customId.split('|');
+        const ticketChannel = await interaction.guild.channels.fetch(ticketChannelId).catch(() => null);
         if (!ticketChannel) return interaction.followUp({ content: 'Ticket channel not found!', ephemeral: true });
 
         const ign = interaction.fields.getTextInputValue('ign_input');
