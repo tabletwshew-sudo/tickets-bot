@@ -17,7 +17,13 @@ const TICKET_CATEGORY_ID = '1434722990054051957';
 const PANEL_CHANNEL_ID = '1434722989571575984';
 const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
 
-let ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
+let ticketsData;
+if (fs.existsSync('./tickets.json')) {
+    ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
+} else {
+    ticketsData = { lastTicket: 0 };
+    fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
+}
 
 // READY EVENT
 client.once('ready', async () => {
@@ -68,56 +74,53 @@ client.on('messageCreate', async message => {
     }
 });
 
-// HANDLE TICKET CREATION FROM DROPDOWN
+// HANDLE DROPDOWN INTERACTION -> SHOW MODAL
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
+    if (interaction.customId !== 'ticket_type_select') return;
 
-    if (interaction.customId === 'ticket_type_select') {
-        const member = interaction.user;
-        const ticketType = interaction.values[0];
+    const member = interaction.user;
+    const ticketType = interaction.values[0];
 
-        // Increment ticket number
-        ticketsData.lastTicket++;
-        fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
-        const ticketNumber = ticketsData.lastTicket;
-        const ticketName = `Ticket-${ticketNumber}`;
+    ticketsData.lastTicket++;
+    fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
+    const ticketNumber = ticketsData.lastTicket;
 
-        // Create ticket channel
-        const ticketChannel = await interaction.guild.channels.create({
-            name: ticketName,
-            type: ChannelType.GuildText,
-            parent: TICKET_CATEGORY_ID,
-            permissionOverwrites: [
-                { id: interaction.guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
-                { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-                { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-            ]
-        });
+    // Create ticket channel first
+    const ticketChannel = await interaction.guild.channels.create({
+        name: `Ticket-${ticketNumber}`,
+        type: ChannelType.GuildText,
+        parent: TICKET_CATEGORY_ID,
+        permissionOverwrites: [
+            { id: interaction.guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
+    });
 
-        // Show modal to collect ticket info
-        const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${ticketNumber}`)
-            .setTitle('Ticket Info');
+    // Show modal for ticket info
+    const modal = new ModalBuilder()
+        .setCustomId(`ticket_modal_${ticketNumber}`)
+        .setTitle('Ticket Info');
 
-        const ignInput = new TextInputBuilder()
-            .setCustomId('ign_input')
-            .setLabel('Your IGN')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
+    const ignInput = new TextInputBuilder()
+        .setCustomId('ign_input')
+        .setLabel('Your IGN')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
 
-        const issueInput = new TextInputBuilder()
-            .setCustomId('issue_input')
-            .setLabel('Describe your Issue')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
+    const issueInput = new TextInputBuilder()
+        .setCustomId('issue_input')
+        .setLabel('Describe your Issue')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
 
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(ignInput),
-            new ActionRowBuilder().addComponents(issueInput)
-        );
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(ignInput),
+        new ActionRowBuilder().addComponents(issueInput)
+    );
 
-        await interaction.showModal(modal);
-    }
+    await interaction.showModal(modal);
 });
 
 // HANDLE MODAL SUBMIT
@@ -133,7 +136,6 @@ client.on('interactionCreate', async interaction => {
     const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
     if (!ticketChannel) return;
 
-    // Close button
     const closeButton = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('close_ticket')
