@@ -162,50 +162,71 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// CLOSE BUTTON -> DM + TRANSCRIPT
+// CLOSE BUTTON -> ASK FOR REASON MODAL
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     if (interaction.customId !== 'close_ticket') return;
 
-    const ticketChannel = interaction.channel;
+    const modal = new ModalBuilder()
+        .setCustomId(`close_modal|${interaction.channel.id}`)
+        .setTitle('Close Ticket');
+
+    const reasonInput = new TextInputBuilder()
+        .setCustomId('close_reason')
+        .setLabel('Reason for closing this ticket')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+
+    await interaction.showModal(modal);
+});
+
+// HANDLE CLOSE MODAL -> DELETE CHANNEL + DM + TRANSCRIPT
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isModalSubmit()) return;
+    if (!interaction.customId.startsWith('close_modal|')) return;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const [, ticketChannelId] = interaction.customId.split('|');
+    const ticketChannel = await interaction.guild.channels.fetch(ticketChannelId).catch(() => null);
+    if (!ticketChannel) return interaction.followUp({ content: 'Ticket channel not found!', ephemeral: true });
+
+    const reason = interaction.fields.getTextInputValue('close_reason');
     const staffMember = interaction.user;
+    const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
+    const messages = await ticketChannel.messages.fetch({ limit: 100 });
+    const messageCount = messages.size;
+    const durationMinutes = Math.floor((Date.now() - ticketChannel.createdTimestamp) / 60000);
 
-    await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
-
-    try {
-        const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
-        const messages = await ticketChannel.messages.fetch({ limit: 100 });
-        const messageCount = messages.size;
-        const durationMinutes = Math.floor((Date.now() - ticketChannel.createdTimestamp) / 60000);
-
-        // DM ticket opener
-        if (ticketCreator) {
-            const closedEmbed = new EmbedBuilder()
-                .setTitle('🔒 Your Ticket Was Closed')
-                .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
-                .setColor('#FF0000');
-            try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
-        }
-
-        // Transcript embed
-        const transcriptEmbed = new EmbedBuilder()
-            .setTitle('📄 Auto-Generated Transcript')
-            .setDescription(`Transcript automatically generated for **${ticketChannel.name}**`)
-            .addFields(
-                { name: '🎫 Ticket', value: `**${ticketChannel.name}** • Created by <@${ticketCreator?.id || 'Unknown'}> • ${messageCount} messages` },
-                { name: '⏱️ Duration', value: `${durationMinutes} minutes • Status: Closed (Auto-transcript)` },
-                { name: '📅 Generated', value: `<t:${Math.floor(Date.now()/1000)}:f>` },
-                { name: 'Transcript', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' }
-            )
-            .setColor('#00FFFF');
-
-        const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-        if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
-
-        await ticketChannel.delete().catch(() => {});
-    } catch (err) {
-        console.error('[ERROR] Closing ticket failed:', err);
+    // DM ticket opener with reason
+    if (ticketCreator) {
+        const closedEmbed = new EmbedBuilder()
+            .setTitle('🔒 Your Ticket Was Closed')
+            .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n**Reason:** ${reason}\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
+            .setColor('#FF0000');
+        try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
     }
+
+    // Transcript embed
+    const transcriptEmbed = new EmbedBuilder()
+        .setTitle('📄 Auto-Generated Transcript')
+        .setDescription(`Transcript automatically generated for **${ticketChannel.name}**`)
+        .addFields(
+            { name: '🎫 Ticket', value: `**${ticketChannel.name}** • Created by <@${ticketCreator?.id || 'Unknown'}> • ${messageCount} messages` },
+            { name: '⏱️ Duration', value: `${durationMinutes} minutes • Status: Closed (Auto-transcript)` },
+            { name: '📅 Generated', value: `<t:${Math.floor(Date.now()/1000)}:f>` },
+            { name: 'Reason', value: reason },
+            { name: 'Transcript', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' }
+        )
+        .setColor('#00FFFF');
+
+    const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+    if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
+
+    await ticketChannel.delete().catch(() => {});
+    await interaction.followUp({ content: 'Ticket closed successfully.', ephemeral: true });
 });
 
 // /ADD COMMAND
