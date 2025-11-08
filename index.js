@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const {
     Client, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle,
-    ChannelType, PermissionsBitField, EmbedBuilder, Collection, StringSelectMenuBuilder,
+    ChannelType, PermissionsBitField, EmbedBuilder, StringSelectMenuBuilder,
     ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 
@@ -125,9 +125,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.showModal(modal);
     } catch (error) {
         console.error('[ERROR] Dropdown interaction failed:', error);
-        if (!interaction.replied) {
-            await interaction.reply({ content: 'An error occurred. Please try again.', ephemeral: true });
-        }
+        if (!interaction.replied) await interaction.reply({ content: 'An error occurred. Please try again.', ephemeral: true });
     }
 });
 
@@ -137,15 +135,15 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.customId.startsWith('ticket_modal_')) return;
 
     try {
+        // Defer reply immediately to avoid "Something went wrong"
+        await interaction.deferReply({ ephemeral: true });
+
         const member = interaction.user;
         const ticketNumber = interaction.customId.split('_')[2];
 
-        // Get the ticket channel
+        // Get ticket channel
         const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
-        if (!ticketChannel) {
-            console.log(`[ERROR] Ticket channel not found for Ticket-${ticketNumber}`);
-            return interaction.reply({ content: 'Error: Ticket channel not found!', ephemeral: true });
-        }
+        if (!ticketChannel) return interaction.followUp({ content: 'Ticket channel not found!', ephemeral: true });
 
         // Get modal inputs
         const ign = interaction.fields.getTextInputValue('ign_input');
@@ -174,18 +172,16 @@ client.on('interactionCreate', async interaction => {
         await ticketChannel.send({ embeds: [embed], components: [closeButton] });
 
         // Reply to user to acknowledge the modal
-        await interaction.reply({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
+        await interaction.followUp({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
         console.log(`[INFO] Ticket-${ticketNumber} created by ${member.tag}`);
         
     } catch (error) {
         console.error('[ERROR] Modal submit failed:', error);
-        if (!interaction.replied) {
-            await interaction.reply({ content: 'An error occurred while creating your ticket. Please try again.', ephemeral: true });
-        }
+        if (!interaction.replied) await interaction.followUp({ content: 'An error occurred while creating your ticket. Please try again.', ephemeral: true });
     }
 });
 
-// CLOSE BUTTON
+// CLOSE BUTTON WITH AUTO-TRANSCRIPT
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     if (interaction.customId !== 'close_ticket') return;
@@ -195,26 +191,48 @@ client.on('interactionCreate', async interaction => {
 
     await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
 
-    // DM ticket opener
-    const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
-    if (ticketCreator) {
-        const closedEmbed = new EmbedBuilder()
-            .setTitle('🔒 Your Ticket Was Closed')
-            .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
-            .setColor('#FF0000');
-        try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
+    try {
+        // Get ticket creator
+        const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
+
+        // Fetch messages
+        const messages = await ticketChannel.messages.fetch({ limit: 100 });
+        const messageCount = messages.size;
+
+        // Duration
+        const creationTime = ticketChannel.createdTimestamp;
+        const durationMinutes = Math.floor((Date.now() - creationTime) / 60000);
+
+        // DM ticket opener
+        if (ticketCreator) {
+            const closedEmbed = new EmbedBuilder()
+                .setTitle('🔒 Your Ticket Was Closed')
+                .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
+                .setColor('#FF0000');
+            try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
+        }
+
+        // Transcript embed
+        const transcriptEmbed = new EmbedBuilder()
+            .setTitle('📄 Auto-Generated Transcript')
+            .setDescription(`Transcript automatically generated for **${ticketChannel.name}**`)
+            .addFields(
+                { name: '🎫 Ticket', value: `**${ticketChannel.name}** • Created by <@${ticketCreator?.id || 'Unknown'}> • ${messageCount} messages` },
+                { name: '⏱️ Duration', value: `${durationMinutes} minutes • Status: Closed (Auto-transcript)` },
+                { name: '📅 Generated', value: `<t:${Math.floor(Date.now()/1000)}:f>` },
+                { name: 'Transcript', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' }
+            )
+            .setColor('#00FFFF');
+
+        // Send transcript
+        const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+        if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
+
+        // Delete ticket channel
+        await ticketChannel.delete().catch(() => {});
+    } catch (err) {
+        console.error('[ERROR] Closing ticket failed:', err);
     }
-
-    // Transcript
-    const messages = await ticketChannel.messages.fetch({ limit: 100 });
-    const transcript = messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n');
-
-    const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-    if (transcriptChannel) {
-        transcriptChannel.send({ content: `Transcript for **${ticketChannel.name}**:\n\`\`\`${transcript}\`\`\`` });
-    }
-
-    await ticketChannel.delete().catch(() => {});
 });
 
 // /ADD COMMAND
