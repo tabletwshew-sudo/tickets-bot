@@ -75,7 +75,7 @@ client.on('messageCreate', async message => {
     }
 });
 
-// HANDLE DROPDOWN INTERACTION -> SHOW MODAL
+// HANDLE DROPDOWN INTERACTION -> CREATE CHANNEL & SHOW MODAL
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
     if (interaction.customId !== 'ticket_type_select') return;
@@ -102,7 +102,7 @@ client.on('interactionCreate', async interaction => {
 
         // Show modal for ticket info
         const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${ticketNumber}`)
+            .setCustomId(`ticket_modal_${ticketNumber}_${ticketChannel.id}`)
             .setTitle('Ticket Info');
 
         const ignInput = new TextInputBuilder()
@@ -135,21 +135,16 @@ client.on('interactionCreate', async interaction => {
     if (!interaction.customId.startsWith('ticket_modal_')) return;
 
     try {
-        // Defer reply immediately to avoid "Something went wrong"
         await interaction.deferReply({ ephemeral: true });
 
         const member = interaction.user;
-        const ticketNumber = interaction.customId.split('_')[2];
-
-        // Get ticket channel
-        const ticketChannel = interaction.guild.channels.cache.find(ch => ch.name === `Ticket-${ticketNumber}`);
+        const [ticketNumber, ticketChannelId] = interaction.customId.split('_').slice(2);
+        const ticketChannel = await interaction.guild.channels.fetch(ticketChannelId);
         if (!ticketChannel) return interaction.followUp({ content: 'Ticket channel not found!', ephemeral: true });
 
-        // Get modal inputs
         const ign = interaction.fields.getTextInputValue('ign_input');
         const issue = interaction.fields.getTextInputValue('issue_input');
 
-        // Close button
         const closeButton = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('close_ticket')
@@ -158,7 +153,6 @@ client.on('interactionCreate', async interaction => {
                 .setEmoji('🔒')
         );
 
-        // Embed for ticket
         const embed = new EmbedBuilder()
             .setTitle(`🎫 Ticket-${ticketNumber}`)
             .setDescription(`<@${member.id}> Thank you for contacting support, a staff member will be with you soon.`)
@@ -168,10 +162,7 @@ client.on('interactionCreate', async interaction => {
             )
             .setColor('#00FFFF');
 
-        // Send embed to ticket channel
         await ticketChannel.send({ embeds: [embed], components: [closeButton] });
-
-        // Reply to user to acknowledge the modal
         await interaction.followUp({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
         console.log(`[INFO] Ticket-${ticketNumber} created by ${member.tag}`);
         
@@ -192,14 +183,9 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
 
     try {
-        // Get ticket creator
         const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
-
-        // Fetch messages
         const messages = await ticketChannel.messages.fetch({ limit: 100 });
         const messageCount = messages.size;
-
-        // Duration
         const creationTime = ticketChannel.createdTimestamp;
         const durationMinutes = Math.floor((Date.now() - creationTime) / 60000);
 
@@ -224,11 +210,9 @@ client.on('interactionCreate', async interaction => {
             )
             .setColor('#00FFFF');
 
-        // Send transcript
         const transcriptChannel = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
         if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
 
-        // Delete ticket channel
         await ticketChannel.delete().catch(() => {});
     } catch (err) {
         console.error('[ERROR] Closing ticket failed:', err);
