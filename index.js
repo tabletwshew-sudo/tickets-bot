@@ -1,6 +1,9 @@
 require('dotenv').config();
 const fs = require('fs');
-const { Client, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionsBitField, EmbedBuilder, Collection } = require('discord.js');
+const { 
+    Client, GatewayIntentBits, Partials, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+    ChannelType, PermissionsBitField, EmbedBuilder, Collection, StringSelectMenuBuilder
+} = require('discord.js');
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
@@ -129,12 +132,22 @@ client.on('interactionCreate', async interaction => {
                 )
                 .setColor('#00FFFF');
 
-            // Close button
-            const closeRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+            // Dropdown menu for closing
+            const closeMenu = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('ticket_actions')
+                    .setPlaceholder('Select an action')
+                    .addOptions([
+                        {
+                            label: 'Close Ticket',
+                            description: 'Close this ticket',
+                            value: 'close_ticket',
+                            emoji: '🔒'
+                        }
+                    ])
             );
 
-            await ticketChannel.send({ embeds: [infoEmbed], components: [closeRow] });
+            await ticketChannel.send({ embeds: [infoEmbed], components: [closeMenu] });
             collector.stop();
             activeCollectors.delete(ticketChannel.id);
         }
@@ -145,32 +158,29 @@ client.on('interactionCreate', async interaction => {
     });
 });
 
-// Close ticket button
+// Handle dropdown select menu interactions
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isButton()) return;
-    if (interaction.customId !== 'close_ticket') return;
+    if (!interaction.isStringSelectMenu()) return;
+    if (interaction.customId !== 'ticket_actions') return;
 
     const ticketChannel = interaction.channel;
-    const member = interaction.user;
+    const staffMember = interaction.user;
 
-    await interaction.reply({ content: 'Are you sure you want to close this ticket? Click again to confirm.', ephemeral: true });
+    if (interaction.values[0] === 'close_ticket') {
+        await interaction.reply({ content: 'Closing ticket...', ephemeral: true });
 
-    const filter = i => i.user.id === member.id && i.customId === 'close_ticket';
-    const collector = ticketChannel.createMessageComponentCollector({ filter, max: 1, time: 60000 });
-
-    collector.on('collect', async () => {
-        // DM ticket creator
         const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
         if (ticketCreator) {
             const closedEmbed = new EmbedBuilder()
                 .setTitle('🔒 Your Ticket Was Closed')
-                .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${member.tag}.\n🎫 **${ticketChannel.name}** • Server: Coralises Network | OCE • Closed by ${member.tag}\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
+                .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n🎫 **${ticketChannel.name}** • Server: Coralises Network | OCE • Closed by ${staffMember.tag}\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
                 .setColor('#FF0000');
+
             try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
         }
 
         await ticketChannel.delete().catch(() => {});
-    });
+    }
 });
 
 // /add command usable by any member
