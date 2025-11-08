@@ -162,24 +162,53 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// CLOSE BUTTON -> ASK FOR REASON MODAL
+// CLOSE BUTTON -> CONFIRM CLOSE
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     if (interaction.customId !== 'close_ticket') return;
 
-    const modal = new ModalBuilder()
-        .setCustomId(`close_modal|${interaction.channel.id}`)
-        .setTitle('Close Ticket');
+    const confirmRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`confirm_close|${interaction.channel.id}`)
+            .setLabel('Confirm Close')
+            .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+            .setCustomId('cancel_close')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary)
+    );
 
-    const reasonInput = new TextInputBuilder()
-        .setCustomId('close_reason')
-        .setLabel('Reason for closing this ticket')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true);
+    await interaction.reply({ content: 'Are you sure you want to close this ticket?', components: [confirmRow], ephemeral: true });
+});
 
-    modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+// HANDLE CONFIRM OR CANCEL
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
 
-    await interaction.showModal(modal);
+    // Cancel
+    if (interaction.customId === 'cancel_close') {
+        await interaction.update({ content: 'Ticket close cancelled.', components: [] });
+        return;
+    }
+
+    // Confirm -> show reason modal
+    if (interaction.customId.startsWith('confirm_close|')) {
+        const ticketChannelId = interaction.customId.split('|')[1];
+
+        const modal = new ModalBuilder()
+            .setCustomId(`close_modal|${ticketChannelId}`)
+            .setTitle('Close Ticket');
+
+        const reasonInput = new TextInputBuilder()
+            .setCustomId('close_reason')
+            .setLabel('Reason for closing this ticket')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+
+        await interaction.showModal(modal);
+    }
 });
 
 // HANDLE CLOSE MODAL -> DELETE CHANNEL + DM + TRANSCRIPT
@@ -196,28 +225,36 @@ client.on('interactionCreate', async interaction => {
     const reason = interaction.fields.getTextInputValue('close_reason');
     const staffMember = interaction.user;
     const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
-    const messages = await ticketChannel.messages.fetch({ limit: 100 });
-    const messageCount = messages.size;
-    const durationMinutes = Math.floor((Date.now() - ticketChannel.createdTimestamp) / 60000);
 
-    // DM ticket opener with reason
+    const openedAt = Math.floor(ticketChannel.createdTimestamp / 1000);
+    const closedAt = Math.floor(Date.now() / 1000);
+
+    // DM ticket opener
     if (ticketCreator) {
-        const closedEmbed = new EmbedBuilder()
-            .setTitle('🔒 Your Ticket Was Closed')
-            .setDescription(`Your support ticket in **Coralises Network | OCE** has been closed by ${staffMember.tag}.\n**Reason:** ${reason}\n🎫 **${ticketChannel.name}**\n📅 <t:${Math.floor(Date.now()/1000)}:f>`)
+        const dmEmbed = new EmbedBuilder()
+            .setTitle('**Coralises | Ticket Closed**')
+            .setDescription(`🆔 Ticket ID: ${ticketChannel.name}
+📂 Opened By: <@${ticketCreator.id}>
+🔒 Closed By: <@${staffMember.id}>
+⏱ Opened At: <t:${openedAt}:F>
+❓ Reason: ${reason}
+📅 Closed At: <t:${closedAt}:F>`)
             .setColor('#FF0000');
-        try { await ticketCreator.send({ embeds: [closedEmbed] }); } catch {}
+
+        try { await ticketCreator.send({ embeds: [dmEmbed] }); } catch {}
     }
 
     // Transcript embed
+    const messages = await ticketChannel.messages.fetch({ limit: 100 });
     const transcriptEmbed = new EmbedBuilder()
-        .setTitle('📄 Auto-Generated Transcript')
-        .setDescription(`Transcript automatically generated for **${ticketChannel.name}**`)
+        .setTitle('**Coralises | Ticket Closed**')
+        .setDescription(`🆔 Ticket ID: ${ticketChannel.name}
+📂 Opened By: <@${ticketCreator?.id || 'Unknown'}>
+🔒 Closed By: <@${staffMember.id}>
+⏱ Opened At: <t:${openedAt}:F>
+❓ Reason: ${reason}
+📅 Closed At: <t:${closedAt}:F>`)
         .addFields(
-            { name: '🎫 Ticket', value: `**${ticketChannel.name}** • Created by <@${ticketCreator?.id || 'Unknown'}> • ${messageCount} messages` },
-            { name: '⏱️ Duration', value: `${durationMinutes} minutes • Status: Closed (Auto-transcript)` },
-            { name: '📅 Generated', value: `<t:${Math.floor(Date.now()/1000)}:f>` },
-            { name: 'Reason', value: reason },
             { name: 'Transcript', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' }
         )
         .setColor('#00FFFF');
