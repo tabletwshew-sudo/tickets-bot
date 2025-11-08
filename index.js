@@ -75,20 +75,53 @@ client.on('messageCreate', async message => {
     }
 });
 
-// HANDLE DROPDOWN INTERACTION -> CREATE CHANNEL & SHOW MODAL
+// HANDLE DROPDOWN -> SHOW MODAL
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
     if (interaction.customId !== 'ticket_type_select') return;
 
+    const ticketType = interaction.values[0];
+
+    const modal = new ModalBuilder()
+        .setCustomId(`ticket_modal|${ticketType}`)
+        .setTitle('Ticket Info');
+
+    const ignInput = new TextInputBuilder()
+        .setCustomId('ign_input')
+        .setLabel('Your IGN')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+    const issueInput = new TextInputBuilder()
+        .setCustomId('issue_input')
+        .setLabel('Describe your Issue')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(ignInput),
+        new ActionRowBuilder().addComponents(issueInput)
+    );
+
+    await interaction.showModal(modal);
+});
+
+// HANDLE MODAL SUBMIT -> CREATE TICKET CHANNEL
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isModalSubmit()) return;
+    if (!interaction.customId.startsWith('ticket_modal|')) return;
+
+    await interaction.deferReply({ ephemeral: true });
+
     try {
+        const ticketType = interaction.customId.split('|')[1];
         const member = interaction.user;
-        const ticketType = interaction.values[0];
 
         ticketsData.lastTicket++;
         fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
         const ticketNumber = ticketsData.lastTicket;
 
-        // Create ticket channel
+        // Create ticket channel AFTER modal is filled
         const ticketChannel = await interaction.guild.channels.create({
             name: `Ticket-${ticketNumber}`,
             type: ChannelType.GuildText,
@@ -99,48 +132,6 @@ client.on('interactionCreate', async interaction => {
                 { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
             ]
         });
-
-        // Show modal for ticket info
-        const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal|${ticketNumber}|${ticketChannel.id}`) // pass channel ID
-            .setTitle('Ticket Info');
-
-        const ignInput = new TextInputBuilder()
-            .setCustomId('ign_input')
-            .setLabel('Your IGN')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const issueInput = new TextInputBuilder()
-            .setCustomId('issue_input')
-            .setLabel('Describe your Issue')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true);
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(ignInput),
-            new ActionRowBuilder().addComponents(issueInput)
-        );
-
-        await interaction.showModal(modal);
-    } catch (error) {
-        console.error('[ERROR] Dropdown interaction failed:', error);
-        if (!interaction.replied) await interaction.reply({ content: 'An error occurred. Please try again.', ephemeral: true });
-    }
-});
-
-// HANDLE MODAL SUBMIT
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isModalSubmit()) return;
-    if (!interaction.customId.startsWith('ticket_modal|')) return;
-
-    try {
-        await interaction.deferReply({ ephemeral: true });
-
-        const member = interaction.user;
-        const [, ticketNumber, ticketChannelId] = interaction.customId.split('|');
-        const ticketChannel = await interaction.guild.channels.fetch(ticketChannelId).catch(() => null);
-        if (!ticketChannel) return interaction.followUp({ content: 'Ticket channel not found!', ephemeral: true });
 
         const ign = interaction.fields.getTextInputValue('ign_input');
         const issue = interaction.fields.getTextInputValue('issue_input');
@@ -165,14 +156,13 @@ client.on('interactionCreate', async interaction => {
         await ticketChannel.send({ embeds: [embed], components: [closeButton] });
         await interaction.followUp({ content: `Your ticket has been created: ${ticketChannel}`, ephemeral: true });
         console.log(`[INFO] Ticket-${ticketNumber} created by ${member.tag}`);
-        
-    } catch (error) {
-        console.error('[ERROR] Modal submit failed:', error);
-        if (!interaction.replied) await interaction.followUp({ content: 'An error occurred while creating your ticket. Please try again.', ephemeral: true });
+    } catch (err) {
+        console.error(err);
+        if (!interaction.replied) interaction.followUp({ content: 'An error occurred.', ephemeral: true });
     }
 });
 
-// CLOSE BUTTON WITH AUTO-TRANSCRIPT
+// CLOSE BUTTON -> DM + TRANSCRIPT
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     if (interaction.customId !== 'close_ticket') return;
@@ -186,8 +176,7 @@ client.on('interactionCreate', async interaction => {
         const ticketCreator = ticketChannel.members.filter(m => !m.user.bot).first();
         const messages = await ticketChannel.messages.fetch({ limit: 100 });
         const messageCount = messages.size;
-        const creationTime = ticketChannel.createdTimestamp;
-        const durationMinutes = Math.floor((Date.now() - creationTime) / 60000);
+        const durationMinutes = Math.floor((Date.now() - ticketChannel.createdTimestamp) / 60000);
 
         // DM ticket opener
         if (ticketCreator) {
