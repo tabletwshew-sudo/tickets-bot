@@ -294,10 +294,9 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
 });
 
+// ==============================
 // APPLICATION BOT
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
-
-// CONFIG
+// ==============================
 const APPLICATION_PANEL_CHANNEL = '1434722990054051958';
 const APPLICATION_CHANNELS = {
     STAFF: '1434722990200721467',
@@ -346,56 +345,50 @@ const QUESTIONS = {
     ]
 };
 
-// SEND APPLICATION PANEL WITH COMMAND
-client.on('messageCreate', async message => {
-    if (message.content === '!apps' && message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        await sendApplicationPanel();
-    }
-});
-
-// FUNCTION TO SEND APPLICATION PANEL
-async function sendApplicationPanel() {
-    try {
-        const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL);
-        if (!channel) return console.log('Application channel not found.');
-
-        // Check if panel already exists
-        const fetchedMessages = await channel.messages.fetch({ limit: 10 });
-        const panelExists = fetchedMessages.some(m => m.embeds.length && m.embeds[0].title === 'Applications');
-        if (panelExists) return console.log('Application panel already exists.');
-
-        const embed = new EmbedBuilder()
-            .setTitle('Applications')
-            .setDescription('Apply for staff below!')
-            .setColor('#00FFFF');
-
-        const dropdown = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('application_type_select')
-                .setPlaceholder('Select Application Type')
-                .addOptions([
-                    { label: 'Staff Application', value: 'staff_app' },
-                    { label: 'Builder Application', value: 'builder_app' },
-                    { label: 'Dev Application', value: 'dev_app' }
-                ])
-        );
-
-        await channel.send({ embeds: [embed], components: [dropdown] });
-        console.log('Application panel sent automatically.');
-    } catch (err) {
-        console.error('Failed to send application panel:', err);
-    }
+// Load or create apps.json
+let appsData;
+if (fs.existsSync('./apps.json')) {
+    appsData = JSON.parse(fs.readFileSync('./apps.json', 'utf8'));
+} else {
+    appsData = { applications: { lastApplicationId: 0, activeApplications: {} } };
+    fs.writeFileSync('./apps.json', JSON.stringify(appsData, null, 4));
 }
 
-// AUTOMATIC PANEL ON BOT START
+// ==============================
+// SEND APPLICATION PANEL ON BOT START
+// ==============================
 client.once('ready', async () => {
-    console.log(`Application Bot online as ${client.user.tag}`);
-    await sendApplicationPanel();
+    console.log(`Application Bot ready as ${client.user.tag}`);
+
+    const panelChannel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL).catch(() => null);
+    if (!panelChannel) return console.log('Application panel channel not found.');
+
+    const embed = new EmbedBuilder()
+        .setTitle('Applications')
+        .setDescription('Apply for staff below!')
+        .setColor('#00FFFF');
+
+    const dropdown = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('application_type_select')
+            .setPlaceholder('Select Application Type')
+            .addOptions([
+                { label: 'Staff Application', value: 'staff_app' },
+                { label: 'Builder Application', value: 'builder_app' },
+                { label: 'Dev Application', value: 'dev_app' }
+            ])
+    );
+
+    panelChannel.send({ embeds: [embed], components: [dropdown] }).catch(() => null);
 });
 
+// ==============================
 // HANDLE DROPDOWN SELECTION
+// ==============================
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
+    if (interaction.customId !== 'application_type_select') return;
+
     const type = interaction.values[0];
     if (!['staff_app','builder_app','dev_app'].includes(type)) return;
 
@@ -418,9 +411,12 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
 });
 
+// ==============================
 // HANDLE START / CANCEL BUTTONS
+// ==============================
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
+
     const embed = interaction.message.embeds[0];
     if (!embed) return;
 
@@ -439,7 +435,9 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+// ==============================
 // APPLICATION MESSAGE COLLECTOR
+// ==============================
 async function startApplication(user, type) {
     const questions = QUESTIONS[type];
     const answers = [];
@@ -469,14 +467,21 @@ async function startApplication(user, type) {
     collector.on('end', async (_, reason) => {
         if (reason === 'cancelled') return dm.send('Application cancelled.');
 
+        appsData.applications.lastApplicationId++;
+        const applicationId = appsData.applications.lastApplicationId;
+        appsData.applications.activeApplications[applicationId] = { userId: user.id, type };
+
+        fs.writeFileSync('./apps.json', JSON.stringify(appsData, null, 4));
+
         const channelId = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF :
                           type === 'builder_app' ? APPLICATION_CHANNELS.BUILDER :
                           APPLICATION_CHANNELS.DEV;
+
         const staffChannel = await client.channels.fetch(channelId);
 
         const embed = new EmbedBuilder()
             .setTitle(`${user.username}'s ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
-            .setDescription('Application Submitted')
+            .setDescription(`Application Submitted\nID: ${applicationId}`)
             .setColor('#00FFFF');
 
         for (let i = 0; i < questions.length; i++) {
@@ -491,118 +496,73 @@ async function startApplication(user, type) {
             new ButtonBuilder().setCustomId('open_ticket_app').setLabel('Open Ticket With User').setStyle(ButtonStyle.Primary)
         );
 
-        await staffChannel.send({ embeds: [embed], components: [buttons] });
+        if (staffChannel) staffChannel.send({ embeds: [embed], components: [buttons] });
         await dm.send('✅ Your application has been submitted!');
     });
 }
 
-// ACCEPT / DENY BUTTON HANDLERS
+// ==============================
+// ACCEPT / DENY BUTTON HANDLERS + MODALS
+// ==============================
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isButton()) return;
+    if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+
+    // Handle modals separately
+    if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith('accept_app_reason') || interaction.customId.startsWith('close_app_reason')) {
+            const [action, applicationId] = interaction.customId.split('|');
+            const reason = interaction.fields.getTextInputValue('reason');
+            const applicantId = appsData.applications.activeApplications[applicationId]?.userId;
+            const applicant = applicantId ? await client.users.fetch(applicantId).catch(() => null) : null;
+
+            if (action === 'accept_app_reason') {
+                try { await applicant.send(`✅ Your application has been **accepted**!\nReason: ${reason}`); } catch {}
+                interaction.update({ content: `Application accepted with reason by ${interaction.user.tag}\nReason: ${reason}`, components: [] });
+            } else if (action === 'close_app_reason') {
+                try { await applicant.send(`❌ Your application has been **denied**.\nReason: ${reason}`); } catch {}
+                interaction.update({ content: `Application denied with reason by ${interaction.user.tag}\nReason: ${reason}`, components: [] });
+            }
+        }
+        return;
+    }
+
+    // Buttons
     const embed = interaction.message.embeds[0];
     if (!embed) return;
 
-    const username = embed.title.split("'s")[0];
-    const guild = interaction.guild;
-    const member = guild.members.cache.find(m => m.user.username === username);
-    if (!member) return interaction.reply({ content: 'User not found in guild.', ephemeral: true });
+    const idMatch = embed.description?.match(/ID: (\d+)/);
+    if (!idMatch) return;
+    const applicationId = parseInt(idMatch[1]);
+    const applicantId = appsData.applications.activeApplications[applicationId]?.userId;
+    const applicant = applicantId ? await client.users.fetch(applicantId).catch(() => null) : null;
 
-    const type = embed.title.includes('Staff') ? 'staff_app' :
-                 embed.title.includes('Builder') ? 'builder_app' :
-                 embed.title.includes('Dev') ? 'dev_app' : '';
+    const safeDM = async (user, content) => { if (!user) return; try { await user.send(content); } catch {} };
 
-    // Accept / Deny
-    if (interaction.customId === 'accept_app') await handleAcceptance(member, type, interaction, '');
-    if (interaction.customId === 'close_app') await handleDenial(member, type, interaction, '');
-
-    // Accept / Deny with reason
-    if (interaction.customId === 'accept_app_reason') {
-        await interaction.showModal(
-            new ModalBuilder()
-                .setCustomId(`accept_reason_modal|${member.id}|${type}`)
-                .setTitle('Accept Application')
-                .addComponents(new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('accept_reason_input')
-                        .setLabel('Reason for acceptance')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ))
-        );
+    if (interaction.customId === 'accept_app') {
+        await safeDM(applicant, `✅ Your application has been **accepted**!`);
+        await interaction.update({ content: `Application accepted by ${interaction.user.tag}`, components: [] });
     }
-    if (interaction.customId === 'close_app_reason') {
-        await interaction.showModal(
-            new ModalBuilder()
-                .setCustomId(`deny_reason_modal|${member.id}|${type}`)
-                .setTitle('Deny Application')
-                .addComponents(new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('deny_reason_input')
-                        .setLabel('Reason for denial')
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ))
-        );
+    if (interaction.customId === 'close_app') {
+        await safeDM(applicant, `❌ Your application has been **denied**.`);
+        await interaction.update({ content: `Application denied by ${interaction.user.tag}`, components: [] });
     }
+    if (interaction.customId === 'accept_app_reason' || interaction.customId === 'close_app_reason') {
+        const modal = new ModalBuilder()
+            .setCustomId(`${interaction.customId}|${applicationId}`)
+            .setTitle(interaction.customId === 'accept_app_reason' ? 'Accept Reason' : 'Deny Reason');
 
+        const reasonInput = new TextInputBuilder()
+            .setCustomId('reason')
+            .setLabel('Provide a reason')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+        await interaction.showModal(modal);
+    }
     if (interaction.customId === 'open_ticket_app') {
-        // Open a DM thread for discussion
-        member.send(`A staff member has opened a ticket with you regarding your application.`).catch(() => null);
-        interaction.reply({ content: 'User has been notified in DMs.', ephemeral: true });
+        await interaction.reply({ content: `Click here to DM the applicant: <@${applicantId}>`, ephemeral: true });
     }
-});
-
-// HANDLE MODAL SUBMITS
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isModalSubmit()) return;
-
-    if (interaction.customId.startsWith('accept_reason_modal|')) {
-        const [, userId, type] = interaction.customId.split('|');
-        const member = await interaction.guild.members.fetch(userId).catch(() => null);
-        if (!member) return;
-        const reason = interaction.fields.getTextInputValue('accept_reason_input');
-        await handleAcceptance(member, type, interaction, reason);
-    }
-
-    if (interaction.customId.startsWith('deny_reason_modal|')) {
-        const [, userId, type] = interaction.customId.split('|');
-        const member = await interaction.guild.members.fetch(userId).catch(() => null);
-        if (!member) return;
-        const reason = interaction.fields.getTextInputValue('deny_reason_input');
-        await handleDenial(member, type, interaction, reason);
-    }
-});
-
-// HELPER FUNCTIONS
-async function handleAcceptance(member, type, interaction, reason) {
-    const rolesToAdd = [];
-    if (type === 'staff_app') rolesToAdd.push(ROLES.STAFF, ROLES.TRAINEE);
-    if (type === 'builder_app') rolesToAdd.push(ROLES.STAFF, ROLES.BUILDER);
-    if (type === 'dev_app') rolesToAdd.push(ROLES.STAFF, ROLES.DEV);
-
-    await member.roles.add(rolesToAdd).catch(() => null);
-    await member.send(`✅ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been accepted!${reason ? `\nReason: ${reason}` : ''}`).catch(() => null);
-    if (interaction.update) await interaction.update({ content: `Application accepted for ${member.user.tag}`, components: [] });
-}
-
-async function handleDenial(member, type, interaction, reason) {
-    await member.send(`❌ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been denied.${reason ? `\nReason: ${reason}` : ''}`).catch(() => null);
-    if (interaction.update) await interaction.update({ content: `Application denied for ${member.user.tag}`, components: [] });
-}
-
-// AUTOMATIC LOGGING OF APPLICATION CHANNELS
-client.on('channelDelete', async channel => {
-    if (![APPLICATION_CHANNELS.STAFF, APPLICATION_CHANNELS.BUILDER, APPLICATION_CHANNELS.DEV].includes(channel.id)) return;
-
-    const messages = await channel.messages.fetch({ limit: 100 });
-    const transcriptEmbed = new EmbedBuilder()
-        .setTitle('📄 Application Transcript')
-        .setDescription(`Transcript of <#${channel.id}>`)
-        .addFields({ name: 'Messages', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' })
-        .setColor('#00FFFF');
-
-    const transcriptChannel = channel.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
-    if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
 });
 
 client.login(process.env.TOKEN);
