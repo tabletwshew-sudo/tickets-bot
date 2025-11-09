@@ -294,9 +294,33 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
 });
 
-// ===== APPLICATION BOT =====
+/* =========================
+   ===== TICKET BOT CODE ===
+   ========================= */
 
-const APPLICATION_PANEL_CHANNEL = '1434722990054051958';
+// CONFIG
+const STAFF_ROLE_ID = '1434722988602822762';
+const TICKET_CATEGORY_ID = '1434722990054051957';
+const PANEL_CHANNEL_ID = '1434722989571575984';
+const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
+
+// Load or create tickets.json
+let ticketsData;
+if (fs.existsSync('./tickets.json')) {
+    ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
+} else {
+    ticketsData = { lastTicket: 0 };
+    fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
+}
+
+// READY EVENT
+client.once('ready', async () => {
+    console.log(`Bot online as ${client.user.tag}`);
+});
+
+// =========================
+/* ===== APPLICATION BOT ==== */
+const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // panel channel
 const APPLICATION_CHANNELS = {
     STAFF: '1434722990200721467',
     BUILDER: '1436543071654514800',
@@ -310,7 +334,7 @@ const ROLES = {
     DEV: '1434722988950818923'
 };
 
-const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000;
+const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000; // 3 hours
 
 const QUESTIONS = {
     staff_app: [
@@ -319,8 +343,8 @@ const QUESTIONS = {
         "What is your Minecraft username?",
         "Why do you want to be staff?",
         "What is your availability? How long are you available, do you have school/work, etc?",
-        "Do you have any prior staffing experience? If so, explain in detail and what you learned.",
-        "Are you currently staff on any other servers? Name them.",
+        "Do you have any prior staffing experience? If so, please explain in detail and what you learned.",
+        "Are you currently staff on any other servers? If so, name the servers.",
         "Why should we consider you for staff? What will you bring to the server?",
         "SCENARIO: Someone DMs you about a major duplication glitch and asks for items to tell the dupe method. What do you do?",
         "Provide any additional information you would like to include."
@@ -343,95 +367,108 @@ const QUESTIONS = {
     ]
 };
 
-// ===== SEND APPLICATION PANEL =====
+// SEND APPLICATION PANEL
 client.on('messageCreate', async message => {
-    if (message.author.bot) return;
-    if (message.content !== '!apps') return;
+    if (!message.member || !message.member.permissions) return;
+    if (message.content === '!apps' && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        const embed = new EmbedBuilder()
+            .setTitle('Applications')
+            .setDescription('Apply for staff below!')
+            .setColor('#00FFFF');
 
-    // Optional: restrict to panel channel
-    // if (message.channel.id !== APPLICATION_PANEL_CHANNEL) return;
+        const dropdown = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('application_type_select')
+                .setPlaceholder('Select Application Type')
+                .addOptions([
+                    { label: 'Staff Application', value: 'staff_app' },
+                    { label: 'Builder Application', value: 'builder_app' },
+                    { label: 'Dev Application', value: 'dev_app' }
+                ])
+        );
 
-    if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-    
-    const embed = new EmbedBuilder()
-        .setTitle('Applications')
-        .setDescription('Apply for staff below!')
-        .setColor('#00FFFF');
-
-    const dropdown = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-            .setCustomId('application_type_select')
-            .setPlaceholder('Select Application Type')
-            .addOptions([
-                { label: 'Staff Application', value: 'staff_app' },
-                { label: 'Builder Application', value: 'builder_app' },
-                { label: 'Dev Application', value: 'dev_app' }
-            ])
-    );
-
-    await message.channel.send({ embeds: [embed], components: [dropdown] });
+        message.channel.send({ embeds: [embed], components: [dropdown] });
+    }
 });
 
-// ===== HANDLE ALL INTERACTIONS =====
+// INTERACTION HANDLER (Dropdown, Buttons, Modals)
 client.on('interactionCreate', async interaction => {
-    if (!interaction.guild) return; // ignore DMs
+    try {
+        // === DROPDOWN ===
+        if (interaction.isStringSelectMenu()) {
+            if (interaction.customId === 'application_type_select') {
+                const type = interaction.values[0];
+                const dm = await interaction.user.send({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
+                            .setDescription(`Are you sure you want to apply? Once you start, I will send you a series of questions.\n\nYou have 3 hours to complete the application. Type 'cancel' to stop.`)
+                            .setColor('#00FFFF')
+                    ],
+                    components: [
+                        new ActionRowBuilder().addComponents(
+                            new ButtonBuilder().setCustomId('start_app').setLabel('Start Application').setStyle(ButtonStyle.Success),
+                            new ButtonBuilder().setCustomId('cancel_app').setLabel('Cancel Application').setStyle(ButtonStyle.Danger)
+                        )
+                    ]
+                }).catch(() => null);
 
-    // === Dropdown select ===
-    if (interaction.isStringSelectMenu() && interaction.customId === 'application_type_select') {
-        const type = interaction.values[0];
-        const dm = await interaction.user.send({
-            embeds: [
-                new EmbedBuilder()
-                    .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
-                    .setDescription(`Are you sure you want to apply? Once you start, I will send you a series of questions.\n\nYou have 3 hours to complete the application.`)
-                    .setColor('#00FFFF')
-            ],
-            components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('start_app').setLabel('Start Application').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId('cancel_app').setLabel('Cancel Application').setStyle(ButtonStyle.Danger)
-                )
-            ]
-        }).catch(() => null);
-
-        if (!dm) return interaction.reply({ content: 'Cannot DM you. Please enable DMs.', ephemeral: true });
-        return interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
-    }
-
-    // === Buttons in DM ===
-    if (interaction.isButton()) {
-        const title = interaction.message.embeds[0]?.title || '';
-        const type = title.includes('Staff') ? 'staff_app' : title.includes('Builder') ? 'builder_app' : 'dev_app';
-
-        if (interaction.customId === 'cancel_app') {
-            await interaction.update({ content: 'Application cancelled. You can restart if this was a mistake.', components: [] });
+                if (!dm) return interaction.reply({ content: 'Cannot DM you. Please enable DMs.', ephemeral: true });
+                return interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
+            }
         }
 
-        if (interaction.customId === 'start_app') {
-            await interaction.update({ content: 'Application started! Please answer the questions below in DM.', components: [] });
-            startApplication(interaction.user, type);
+        // === BUTTONS ===
+        if (interaction.isButton()) {
+            const embed = interaction.message.embeds[0];
+            if (!embed) return;
+
+            const type = embed.title.includes('Staff') ? 'staff_app' :
+                         embed.title.includes('Builder') ? 'builder_app' :
+                         embed.title.includes('Dev') ? 'dev_app' : '';
+
+            if (interaction.customId === 'cancel_app') {
+                return interaction.update({ content: 'Application cancelled. You can restart if this was a mistake.', components: [] });
+            }
+
+            if (interaction.customId === 'start_app') {
+                interaction.update({ content: 'Application started! Please answer the questions below. Type your answers as messages here.', components: [] });
+                startApplication(interaction.user, type);
+            }
+
+            // Application buttons (accept/deny)
+            if (['accept_app','close_app','accept_app_reason','close_app_reason','open_ticket_app'].includes(interaction.customId)) {
+                handleAppButtons(interaction, type);
+            }
         }
-    }
 
-    // === Modal submissions for Accept/Deny with reason ===
-    if (interaction.isModalSubmit()) {
-        const [action, userId, type] = interaction.customId.split('|');
-        const member = await interaction.guild.members.fetch(userId).catch(() => null);
-        if (!member) return;
+        // === MODALS ===
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId.startsWith('accept_reason_modal|')) {
+                const [, userId, type] = interaction.customId.split('|');
+                const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                if (!member) return;
+                const reason = interaction.fields.getTextInputValue('accept_reason_input');
+                handleAcceptance(member, type, interaction, reason);
+            }
 
-        const reason = interaction.fields.getTextInputValue(action === 'accept_reason_modal' ? 'accept_reason_input' : 'deny_reason_input');
+            if (interaction.customId.startsWith('deny_reason_modal|')) {
+                const [, userId, type] = interaction.customId.split('|');
+                const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                if (!member) return;
+                const reason = interaction.fields.getTextInputValue('deny_reason_input');
+                handleDenial(member, type, interaction, reason);
+            }
+        }
 
-        if (action === 'accept_reason_modal') await handleAcceptance(member, type, interaction, reason);
-        if (action === 'deny_reason_modal') await handleDenial(member, type, interaction, reason);
-    }
+    } catch (err) { console.error(err); }
 });
 
-// ===== START APPLICATION FUNCTION =====
+// APPLICATION COLLECTOR
 async function startApplication(user, type) {
     const questions = QUESTIONS[type];
     const answers = [];
     let index = 0;
-
     const dm = await user.createDM();
     dm.send(questions[index]);
 
@@ -446,14 +483,18 @@ async function startApplication(user, type) {
         dm.send(questions[index]);
     });
 
-    collector.on('end', async (_, reason) => {
-        if (reason === 'cancelled') return dm.send('Your application has been cancelled.');
+    collector.on('end', async (collected, reason) => {
+        if (reason === 'cancelled') {
+            dm.send('Your application has been cancelled.');
+            return;
+        }
 
         const channelId = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF :
                           type === 'builder_app' ? APPLICATION_CHANNELS.BUILDER :
                           APPLICATION_CHANNELS.DEV;
 
         const staffChannel = await client.channels.fetch(channelId);
+
         const embed = new EmbedBuilder()
             .setTitle(`${user.username}'s ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
             .setDescription('Application Submitted')
@@ -476,7 +517,55 @@ async function startApplication(user, type) {
     });
 }
 
-// ===== HANDLE ACCEPT / DENY =====
+// BUTTON HANDLERS (ACCEPT/DENY/ROLE ASSIGNMENT)
+async function handleAppButtons(interaction, type) {
+    const embed = interaction.message.embeds[0];
+    if (!embed) return;
+    const username = embed.title.split("'s")[0];
+    const guild = interaction.guild;
+    const member = guild.members.cache.find(m => m.user.username === username);
+    if (!member) return interaction.reply({ content: 'User not found.', ephemeral: true });
+
+    if (interaction.customId === 'accept_app') return handleAcceptance(member, type, interaction, '');
+    if (interaction.customId === 'close_app') return handleDenial(member, type, interaction, '');
+    if (interaction.customId === 'accept_app_reason') {
+        return interaction.showModal(
+            new ModalBuilder()
+                .setCustomId(`accept_reason_modal|${member.id}|${type}`)
+                .setTitle('Accept Application')
+                .addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('accept_reason_input')
+                            .setLabel('Reason for acceptance')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                )
+        );
+    }
+    if (interaction.customId === 'close_app_reason') {
+        return interaction.showModal(
+            new ModalBuilder()
+                .setCustomId(`deny_reason_modal|${member.id}|${type}`)
+                .setTitle('Deny Application')
+                .addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('deny_reason_input')
+                            .setLabel('Reason for denial')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                )
+        );
+    }
+
+    if (interaction.customId === 'open_ticket_app') {
+        return interaction.reply({ content: 'Ticket with user opened (integration required).', ephemeral: true });
+    }
+}
+
 async function handleAcceptance(member, type, interaction, reason) {
     const rolesToAdd = [];
     if (type === 'staff_app') rolesToAdd.push(ROLES.STAFF, ROLES.TRAINEE);
