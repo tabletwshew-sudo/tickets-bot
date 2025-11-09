@@ -330,8 +330,9 @@ const BUILDER_QUESTIONS = [
 ];
 
 client.on('messageCreate', async message => {
-    if (message.channel.id !== APPLICATION_PANEL_CHANNEL) return;
-    if (message.content === '!applications' && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    if (message.content === '!applications' && message.channel.id === APPLICATION_PANEL_CHANNEL) {
+        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+        
         const embed = new EmbedBuilder()
             .setTitle('Applications')
             .setDescription('Apply for staff below!')
@@ -350,8 +351,6 @@ client.on('messageCreate', async message => {
         await message.channel.send({ embeds: [embed], components: [row] });
     }
 });
-
-const activeApplications = new Map();
 
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
@@ -417,6 +416,7 @@ client.on('interactionCreate', async interaction => {
         interaction.user.send('Your application has been submitted.');
     });
 
+    // Send first question
     interaction.user.send(questions[0]);
 });
 
