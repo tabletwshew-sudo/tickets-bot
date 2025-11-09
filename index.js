@@ -7,9 +7,18 @@ const {
 } = require('discord.js');
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
+    ],
     partials: [Partials.Channel]
 });
+
+/* =========================
+   ===== TICKET BOT CODE ===
+   ========================= */
 
 // CONFIG
 const STAFF_ROLE_ID = '1434722988602822762';
@@ -121,7 +130,6 @@ client.on('interactionCreate', async interaction => {
         fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
         const ticketNumber = ticketsData.lastTicket;
 
-        // Create ticket channel AFTER modal is filled
         const ticketChannel = await interaction.guild.channels.create({
             name: `Ticket-${ticketNumber}`,
             type: ChannelType.GuildText,
@@ -185,13 +193,11 @@ client.on('interactionCreate', async interaction => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
 
-    // Cancel
     if (interaction.customId === 'cancel_close') {
         await interaction.update({ content: 'Ticket close cancelled.', components: [] });
         return;
     }
 
-    // Confirm -> show reason modal
     if (interaction.customId.startsWith('confirm_close|')) {
         const ticketChannelId = interaction.customId.split('|')[1];
 
@@ -229,7 +235,6 @@ client.on('interactionCreate', async interaction => {
     const openedAt = Math.floor(ticketChannel.createdTimestamp / 1000);
     const closedAt = Math.floor(Date.now() / 1000);
 
-    // DM ticket opener
     if (ticketCreator) {
         const dmEmbed = new EmbedBuilder()
             .setTitle('**Coralises | Ticket Closed**')
@@ -244,7 +249,6 @@ client.on('interactionCreate', async interaction => {
         try { await ticketCreator.send({ embeds: [dmEmbed] }); } catch {}
     }
 
-    // Transcript embed
     const messages = await ticketChannel.messages.fetch({ limit: 100 });
     const transcriptEmbed = new EmbedBuilder()
         .setTitle('**Coralises | Ticket Closed**')
@@ -288,6 +292,132 @@ client.on('interactionCreate', async interaction => {
 
     await channel.permissionOverwrites.edit(user.id, { ViewChannel: true, SendMessages: true });
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
+});
+
+/* ============================
+   ===== APPLICATIONS BOT =====
+   ============================ */
+
+const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // channel with application panel
+const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000; // 3 hours
+
+const APPLICATION_CHANNELS = {
+    STAFF: '1434722990200721467',
+    BUILDER: '1436543071654514800'
+};
+
+const STAFF_QUESTIONS = [
+    "What's your name?",
+    "How old are you?",
+    "What is your Minecraft username?",
+    "Why do you want to be staff?",
+    "What is your availability. How Long you are available to be on the server, do you have school, work and etc.",
+    "Do you have any prior staffing experience? If so, please explain in detail and what did you learn from these experiences.",
+    "Are you currently staff on any other servers? If so, name the servers your staff at currently.",
+    "Why should we consider you for staff, why would you be a better staff than others? What will you bring to the server?",
+    "SCENARIO: Someone has just direct messaged you about a major duplication glitch that they have just found on the server. They ask for in-game items, so that they can tell you the duplication method. What do you do?",
+    "Provide any additional information you would like to include."
+];
+
+const BUILDER_QUESTIONS = [
+    "What's your name?",
+    "How old are you?",
+    "What's your Minecraft ign?",
+    "Can you send some of your builds (if thats what your applying for).",
+    "What's your past experience with dev-ing (if thats what your applying for).",
+    "Why should we choose you over others?",
+    "Is there anything else we need to know about you?"
+];
+
+client.on('messageCreate', async message => {
+    if (message.channel.id !== APPLICATION_PANEL_CHANNEL) return;
+    if (message.content === '!applications' && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        const embed = new EmbedBuilder()
+            .setTitle('Applications')
+            .setDescription('Apply for staff below!')
+            .setColor('#00FFFF');
+
+        const row = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('application_type_select')
+                .setPlaceholder('Select Application Type')
+                .addOptions([
+                    { label: 'Staff Application', value: 'staff_app' },
+                    { label: 'Builder/Dev Application', value: 'builder_app' }
+                ])
+        );
+
+        await message.channel.send({ embeds: [embed], components: [row] });
+    }
+});
+
+const activeApplications = new Map();
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isStringSelectMenu()) return;
+    if (interaction.customId !== 'application_type_select') return;
+
+    const type = interaction.values[0];
+    const questions = type === 'staff_app' ? STAFF_QUESTIONS : BUILDER_QUESTIONS;
+    const targetChannel = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF : APPLICATION_CHANNELS.BUILDER;
+
+    const dm = await interaction.user.send(`**${type === 'staff_app' ? 'Staff' : 'Builder/Dev'} Application**\nYou have 3 hours to complete this application. Type 'cancel' to stop.`).catch(() => null);
+    if (!dm) return interaction.reply({ content: 'Cannot DM you. Please enable DMs.', ephemeral: true });
+
+    interaction.reply({ content: 'Check your DMs to complete the application!', ephemeral: true });
+
+    let answers = [];
+    let questionIndex = 0;
+
+    const filter = m => m.author.id === interaction.user.id;
+    const collector = dm.channel.createMessageCollector({ filter, time: APPLICATION_TIMEOUT });
+
+    collector.on('collect', async msg => {
+        if (msg.content.toLowerCase() === 'cancel') {
+            collector.stop('cancelled');
+            return;
+        }
+
+        answers.push({ question: questions[questionIndex], answer: msg.content });
+        questionIndex++;
+
+        if (questionIndex >= questions.length) {
+            collector.stop('completed');
+            return;
+        }
+
+        await interaction.user.send(questions[questionIndex]);
+    });
+
+    collector.on('end', async (collected, reason) => {
+        if (reason === 'cancelled') {
+            interaction.user.send('Your application has been cancelled.');
+            return;
+        }
+
+        const appEmbed = new EmbedBuilder()
+            .setTitle(`${interaction.user.username}'s ${type === 'staff_app' ? 'Staff' : 'Builder/Dev'} Application`)
+            .setDescription('Application Submitted')
+            .setColor('#00FFFF');
+
+        for (let i = 0; i < answers.length; i++) {
+            appEmbed.addFields({ name: `${i+1}. ${answers[i].question}`, value: answers[i].answer });
+        }
+
+        const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('accept_app').setLabel('Accept').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('close_app').setLabel('Close').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('accept_app_reason').setLabel('Accept with Reason').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('close_app_reason').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('open_ticket_app').setLabel('Open Ticket With User').setStyle(ButtonStyle.Primary)
+        );
+
+        const staffChannel = await client.channels.fetch(targetChannel);
+        staffChannel.send({ embeds: [appEmbed], components: [buttons] });
+        interaction.user.send('Your application has been submitted.');
+    });
+
+    interaction.user.send(questions[0]);
 });
 
 client.login(process.env.TOKEN);
