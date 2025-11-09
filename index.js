@@ -294,13 +294,6 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
 });
 
-/* =========================
-   ===== TICKET BOT CODE ===
-   ========================= */
-
-// APPLICATION BOT
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
-
 // CONFIG
 const APPLICATION_PANEL_CHANNEL = '1434722990054051958';
 const APPLICATION_CHANNELS = {
@@ -350,10 +343,33 @@ const QUESTIONS = {
     ]
 };
 
-// SEND APPLICATION PANEL FUNCTION
-async function sendApplicationPanel() {
+// SEND APPLICATION PANEL ON COMMAND
+client.on('messageCreate', async message => {
+    if (message.content === '!apps' && message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        await sendApplicationPanel();
+    }
+});
+
+// AUTO SEND APPLICATION PANEL ON RESTART
+client.once('ready', async () => {
+    console.log(`Application Bot online as ${client.user.tag}`);
+
     const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL).catch(() => null);
-    if (!channel) return console.log("Application panel channel not found.");
+    if (!channel) return console.log('Application panel channel not found.');
+
+    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => []);
+    const panelExists = messages.some(msg => msg.embeds.length > 0 && msg.embeds[0].title === 'Applications');
+
+    if (panelExists) return console.log('Application panel already exists. Skipping creation.');
+
+    await sendApplicationPanel();
+    console.log('Application panel sent successfully.');
+});
+
+// FUNCTION TO SEND PANEL
+async function sendApplicationPanel() {
+    const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL);
+    if (!channel) return;
 
     const embed = new EmbedBuilder()
         .setTitle('Applications')
@@ -373,12 +389,6 @@ async function sendApplicationPanel() {
 
     await channel.send({ embeds: [embed], components: [dropdown] });
 }
-
-// BOT READY
-client.on('ready', async () => {
-    console.log(`Application Bot online as ${client.user.tag}`);
-    await sendApplicationPanel();
-});
 
 // HANDLE DROPDOWN SELECTION
 client.on('interactionCreate', async interaction => {
@@ -576,7 +586,7 @@ async function handleDenial(member, type, interaction, reason) {
     if (interaction.update) await interaction.update({ content: `Application denied for ${member.user.tag}`, components: [] });
 }
 
-// AUTOMATIC LOGGING OF APPLICATION CHANNELS
+// LOGGING APPLICATION CHANNEL DELETIONS
 client.on('channelDelete', async channel => {
     if (![APPLICATION_CHANNELS.STAFF, APPLICATION_CHANNELS.BUILDER, APPLICATION_CHANNELS.DEV].includes(channel.id)) return;
 
