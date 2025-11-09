@@ -295,20 +295,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 // APPLICATIONS BOT
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
-require('dotenv').config();
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
-    ],
-    partials: ['CHANNEL']
-});
-
-// CONFIG
 const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // panel channel
 const APPLICATION_CHANNELS = {
     STAFF: '1434722990200721467',
