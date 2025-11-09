@@ -294,82 +294,147 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
 });
 
-/* ============================
-   ===== APPLICATIONS BOT =====
-   ============================ */
+// APPLICATIONS BOT
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
+require('dotenv').config();
 
-const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // channel with application panel
-const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000; // 3 hours
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
+    ],
+    partials: ['CHANNEL']
+});
 
+// CONFIG
+const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // panel channel
 const APPLICATION_CHANNELS = {
     STAFF: '1434722990200721467',
-    BUILDER: '1436543071654514800'
+    BUILDER: '1436543071654514800',
+    DEV: '1436911907780034721'
 };
 
-const STAFF_QUESTIONS = [
-    "What's your name?",
-    "How old are you?",
-    "What is your Minecraft username?",
-    "Why do you want to be staff?",
-    "What is your availability. How Long you are available to be on the server, do you have school, work and etc.",
-    "Do you have any prior staffing experience? If so, please explain in detail and what did you learn from these experiences.",
-    "Are you currently staff on any other servers? If so, name the servers your staff at currently.",
-    "Why should we consider you for staff, why would you be a better staff than others? What will you bring to the server?",
-    "SCENARIO: Someone has just direct messaged you about a major duplication glitch that they have just found on the server. They ask for in-game items, so that they can tell you the duplication method. What do you do?",
-    "Provide any additional information you would like to include."
-];
+const ROLES = {
+    STAFF: '1434722988602822762',
+    TRAINEE: '1434722988950818917',
+    BUILDER: '1434722988950818922',
+    DEV: '1434722988950818923'
+};
 
-const BUILDER_QUESTIONS = [
-    "What's your name?",
-    "How old are you?",
-    "What's your Minecraft ign?",
-    "Can you send some of your builds (if thats what your applying for).",
-    "What's your past experience with dev-ing (if thats what your applying for).",
-    "Why should we choose you over others?",
-    "Is there anything else we need to know about you?"
-];
+const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000; // 3 hours
 
+const QUESTIONS = {
+    staff_app: [
+        "What's your name?",
+        "How old are you?",
+        "What is your Minecraft username?",
+        "Why do you want to be staff?",
+        "What is your availability? How long are you available, do you have school/work, etc?",
+        "Do you have any prior staffing experience? If so, please explain in detail and what you learned.",
+        "Are you currently staff on any other servers? If so, name the servers.",
+        "Why should we consider you for staff? What will you bring to the server?",
+        "SCENARIO: Someone DMs you about a major duplication glitch and asks for items to tell the dupe method. What do you do?",
+        "Provide any additional information you would like to include."
+    ],
+    builder_app: [
+        "What's your name?",
+        "How old are you?",
+        "What's your Minecraft IGN?",
+        "Can you send some of your builds (if applicable)?",
+        "Why should we choose you over others?",
+        "Is there anything else we need to know about you?"
+    ],
+    dev_app: [
+        "What's your name?",
+        "How old are you?",
+        "What's your Minecraft IGN?",
+        "Can you send some of your builds (if applicable)?",
+        "Why should we choose you over others?",
+        "Is there anything else we need to know about you?"
+    ]
+};
+
+// SEND APPLICATION PANEL
 client.on('messageCreate', async message => {
-    if (message.content === '!applications' && message.channel.id === APPLICATION_PANEL_CHANNEL) {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-        
+    if (message.channel.id !== APPLICATION_PANEL_CHANNEL) return;
+    if (message.content === '!apps' && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         const embed = new EmbedBuilder()
             .setTitle('Applications')
             .setDescription('Apply for staff below!')
             .setColor('#00FFFF');
 
-        const row = new ActionRowBuilder().addComponents(
+        const dropdown = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('application_type_select')
                 .setPlaceholder('Select Application Type')
                 .addOptions([
                     { label: 'Staff Application', value: 'staff_app' },
-                    { label: 'Builder/Dev Application', value: 'builder_app' }
+                    { label: 'Builder Application', value: 'builder_app' },
+                    { label: 'Dev Application', value: 'dev_app' }
                 ])
         );
 
-        await message.channel.send({ embeds: [embed], components: [row] });
+        await message.channel.send({ embeds: [embed], components: [dropdown] });
     }
 });
 
+// HANDLE DROPDOWN
 client.on('interactionCreate', async interaction => {
     if (!interaction.isStringSelectMenu()) return;
-    if (interaction.customId !== 'application_type_select') return;
+    if (!['staff_app','builder_app','dev_app'].includes(interaction.values[0])) return;
 
     const type = interaction.values[0];
-    const questions = type === 'staff_app' ? STAFF_QUESTIONS : BUILDER_QUESTIONS;
-    const targetChannel = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF : APPLICATION_CHANNELS.BUILDER;
 
-    const dm = await interaction.user.send(`**${type === 'staff_app' ? 'Staff' : 'Builder/Dev'} Application**\nYou have 3 hours to complete this application. Type 'cancel' to stop.`).catch(() => null);
+    const dm = await interaction.user.send({
+        embeds: [
+            new EmbedBuilder()
+                .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
+                .setDescription(`Are you sure you want to apply? Once you start, I will send you a series of questions.\n\nYou have 3 hours to complete the application. Type 'cancel' to stop.`)
+                .setColor('#00FFFF')
+        ],
+        components: [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('start_app').setLabel('Start Application').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('cancel_app').setLabel('Cancel Application').setStyle(ButtonStyle.Danger)
+            )
+        ]
+    }).catch(() => null);
+
     if (!dm) return interaction.reply({ content: 'Cannot DM you. Please enable DMs.', ephemeral: true });
+    interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
+});
 
-    interaction.reply({ content: 'Check your DMs to complete the application!', ephemeral: true });
+// HANDLE START / CANCEL BUTTONS IN DM
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
+    const type = interaction.message.embeds[0].title.includes('Staff') ? 'staff_app' :
+                 interaction.message.embeds[0].title.includes('Builder') ? 'builder_app' :
+                 interaction.message.embeds[0].title.includes('Dev') ? 'dev_app' : '';
 
-    let answers = [];
-    let questionIndex = 0;
+    if (interaction.customId === 'cancel_app') {
+        await interaction.update({ content: 'Application cancelled. You can restart if this was a mistake.', components: [] });
+        return;
+    }
 
-    const filter = m => m.author.id === interaction.user.id;
-    const collector = dm.channel.createMessageCollector({ filter, time: APPLICATION_TIMEOUT });
+    if (interaction.customId === 'start_app') {
+        await interaction.update({ content: 'Application started! Please answer the questions below. Type your answers as messages here.', components: [] });
+        startApplication(interaction.user, type);
+    }
+});
+
+// APPLICATION COLLECTOR
+async function startApplication(user, type) {
+    const questions = QUESTIONS[type];
+    const answers = [];
+    let index = 0;
+
+    const dm = await user.createDM();
+    dm.send(questions[index]);
+
+    const filter = m => m.author.id === user.id;
+    const collector = dm.createMessageCollector({ filter, time: APPLICATION_TIMEOUT });
 
     collector.on('collect', async msg => {
         if (msg.content.toLowerCase() === 'cancel') {
@@ -377,47 +442,146 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        answers.push({ question: questions[questionIndex], answer: msg.content });
-        questionIndex++;
-
-        if (questionIndex >= questions.length) {
+        answers.push(msg.content);
+        index++;
+        if (index >= questions.length) {
             collector.stop('completed');
             return;
         }
-
-        await interaction.user.send(questions[questionIndex]);
+        dm.send(questions[index]);
     });
 
     collector.on('end', async (collected, reason) => {
         if (reason === 'cancelled') {
-            interaction.user.send('Your application has been cancelled.');
+            dm.send('Your application has been cancelled.');
             return;
         }
 
-        const appEmbed = new EmbedBuilder()
-            .setTitle(`${interaction.user.username}'s ${type === 'staff_app' ? 'Staff' : 'Builder/Dev'} Application`)
+        // SEND TO STAFF CHANNEL
+        const channelId = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF :
+                          type === 'builder_app' ? APPLICATION_CHANNELS.BUILDER :
+                          APPLICATION_CHANNELS.DEV;
+        const staffChannel = await client.channels.fetch(channelId);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`${user.username}'s ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
             .setDescription('Application Submitted')
             .setColor('#00FFFF');
 
-        for (let i = 0; i < answers.length; i++) {
-            appEmbed.addFields({ name: `${i+1}. ${answers[i].question}`, value: answers[i].answer });
+        for (let i = 0; i < questions.length; i++) {
+            embed.addFields({ name: `${i+1}. ${questions[i]}`, value: answers[i] || 'User skipped this question.' });
         }
 
         const buttons = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('accept_app').setLabel('Accept').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('close_app').setLabel('Close').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('close_app').setLabel('Deny').setStyle(ButtonStyle.Danger),
             new ButtonBuilder().setCustomId('accept_app_reason').setLabel('Accept with Reason').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('close_app_reason').setLabel('Close with Reason').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('close_app_reason').setLabel('Deny with Reason').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('open_ticket_app').setLabel('Open Ticket With User').setStyle(ButtonStyle.Primary)
         );
 
-        const staffChannel = await client.channels.fetch(targetChannel);
-        staffChannel.send({ embeds: [appEmbed], components: [buttons] });
-        interaction.user.send('Your application has been submitted.');
+        staffChannel.send({ embeds: [embed], components: [buttons] });
+        dm.send('✅ Your application has been submitted.');
     });
+}
 
-    // Send first question
-    interaction.user.send(questions[0]);
+// BUTTON HANDLERS (ACCEPT/DENY/ROLE ASSIGNMENT)
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
+
+    const embed = interaction.message.embeds[0];
+    if (!embed) return;
+    const username = embed.title.split("'s")[0];
+    const guild = interaction.guild;
+    const member = guild.members.cache.find(m => m.user.username === username);
+    if (!member) return interaction.reply({ content: 'User not found in the guild.', ephemeral: true });
+
+    const type = embed.title.includes('Staff') ? 'staff_app' :
+                 embed.title.includes('Builder') ? 'builder_app' :
+                 embed.title.includes('Dev') ? 'dev_app' : '';
+
+    if (interaction.customId === 'accept_app') {
+        await handleAcceptance(member, type, interaction, '');
+    }
+
+    if (interaction.customId === 'close_app') {
+        await handleDenial(member, type, interaction, '');
+    }
+
+    if (interaction.customId === 'accept_app_reason') {
+        await interaction.showModal(
+            new ModalBuilder()
+                .setCustomId(`accept_reason_modal|${member.id}|${type}`)
+                .setTitle('Accept Application')
+                .addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('accept_reason_input')
+                            .setLabel('Reason for acceptance')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                )
+        );
+    }
+
+    if (interaction.customId === 'close_app_reason') {
+        await interaction.showModal(
+            new ModalBuilder()
+                .setCustomId(`deny_reason_modal|${member.id}|${type}`)
+                .setTitle('Deny Application')
+                .addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId('deny_reason_input')
+                            .setLabel('Reason for denial')
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                )
+        );
+    }
+
+    if (interaction.customId === 'open_ticket_app') {
+        interaction.reply({ content: 'Ticket opened with user (integration required).', ephemeral: true });
+    }
 });
+
+// HANDLE MODAL SUBMITS FOR REASONS
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isModalSubmit()) return;
+
+    if (interaction.customId.startsWith('accept_reason_modal|')) {
+        const [, userId, type] = interaction.customId.split('|');
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member) return;
+        const reason = interaction.fields.getTextInputValue('accept_reason_input');
+        await handleAcceptance(member, type, interaction, reason);
+    }
+
+    if (interaction.customId.startsWith('deny_reason_modal|')) {
+        const [, userId, type] = interaction.customId.split('|');
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member) return;
+        const reason = interaction.fields.getTextInputValue('deny_reason_input');
+        await handleDenial(member, type, interaction, reason);
+    }
+});
+
+async function handleAcceptance(member, type, interaction, reason) {
+    const rolesToAdd = [];
+    if (type === 'staff_app') rolesToAdd.push(ROLES.STAFF, ROLES.TRAINEE);
+    if (type === 'builder_app') rolesToAdd.push(ROLES.STAFF, ROLES.BUILDER);
+    if (type === 'dev_app') rolesToAdd.push(ROLES.STAFF, ROLES.DEV);
+
+    await member.roles.add(rolesToAdd).catch(() => null);
+    await member.send(`✅ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been accepted!${reason ? `\nReason: ${reason}` : ''}`);
+    if (interaction.update) await interaction.update({ content: `Application accepted for ${member.user.tag}`, components: [] });
+}
+
+async function handleDenial(member, type, interaction, reason) {
+    await member.send(`❌ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been denied.${reason ? `\nReason: ${reason}` : ''}`);
+    if (interaction.update) await interaction.update({ content: `Application denied for ${member.user.tag}`, components: [] });
+}
 
 client.login(process.env.TOKEN);
