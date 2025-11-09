@@ -294,6 +294,9 @@ client.on('interactionCreate', async interaction => {
     interaction.reply({ content: `<@${user.id}> has been added to this ticket.` });
 });
 
+// APPLICATION BOT
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
+
 // CONFIG
 const APPLICATION_PANEL_CHANNEL = '1434722990054051958';
 const APPLICATION_CHANNELS = {
@@ -343,52 +346,52 @@ const QUESTIONS = {
     ]
 };
 
-// SEND APPLICATION PANEL ON COMMAND
+// SEND APPLICATION PANEL WITH COMMAND
 client.on('messageCreate', async message => {
     if (message.content === '!apps' && message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
         await sendApplicationPanel();
     }
 });
 
-// AUTO SEND APPLICATION PANEL ON RESTART
+// FUNCTION TO SEND APPLICATION PANEL
+async function sendApplicationPanel() {
+    try {
+        const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL);
+        if (!channel) return console.log('Application channel not found.');
+
+        // Check if panel already exists
+        const fetchedMessages = await channel.messages.fetch({ limit: 10 });
+        const panelExists = fetchedMessages.some(m => m.embeds.length && m.embeds[0].title === 'Applications');
+        if (panelExists) return console.log('Application panel already exists.');
+
+        const embed = new EmbedBuilder()
+            .setTitle('Applications')
+            .setDescription('Apply for staff below!')
+            .setColor('#00FFFF');
+
+        const dropdown = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('application_type_select')
+                .setPlaceholder('Select Application Type')
+                .addOptions([
+                    { label: 'Staff Application', value: 'staff_app' },
+                    { label: 'Builder Application', value: 'builder_app' },
+                    { label: 'Dev Application', value: 'dev_app' }
+                ])
+        );
+
+        await channel.send({ embeds: [embed], components: [dropdown] });
+        console.log('Application panel sent automatically.');
+    } catch (err) {
+        console.error('Failed to send application panel:', err);
+    }
+}
+
+// AUTOMATIC PANEL ON BOT START
 client.once('ready', async () => {
     console.log(`Application Bot online as ${client.user.tag}`);
-
-    const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL).catch(() => null);
-    if (!channel) return console.log('Application panel channel not found.');
-
-    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => []);
-    const panelExists = messages.some(msg => msg.embeds.length > 0 && msg.embeds[0].title === 'Applications');
-
-    if (panelExists) return console.log('Application panel already exists. Skipping creation.');
-
     await sendApplicationPanel();
-    console.log('Application panel sent successfully.');
 });
-
-// FUNCTION TO SEND PANEL
-async function sendApplicationPanel() {
-    const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL);
-    if (!channel) return;
-
-    const embed = new EmbedBuilder()
-        .setTitle('Applications')
-        .setDescription('Apply for staff below!')
-        .setColor('#00FFFF');
-
-    const dropdown = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-            .setCustomId('application_type_select')
-            .setPlaceholder('Select Application Type')
-            .addOptions([
-                { label: 'Staff Application', value: 'staff_app' },
-                { label: 'Builder Application', value: 'builder_app' },
-                { label: 'Dev Application', value: 'dev_app' }
-            ])
-    );
-
-    await channel.send({ embeds: [embed], components: [dropdown] });
-}
 
 // HANDLE DROPDOWN SELECTION
 client.on('interactionCreate', async interaction => {
@@ -543,6 +546,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.customId === 'open_ticket_app') {
+        // Open a DM thread for discussion
         member.send(`A staff member has opened a ticket with you regarding your application.`).catch(() => null);
         interaction.reply({ content: 'User has been notified in DMs.', ephemeral: true });
     }
@@ -586,7 +590,7 @@ async function handleDenial(member, type, interaction, reason) {
     if (interaction.update) await interaction.update({ content: `Application denied for ${member.user.tag}`, components: [] });
 }
 
-// LOGGING APPLICATION CHANNEL DELETIONS
+// AUTOMATIC LOGGING OF APPLICATION CHANNELS
 client.on('channelDelete', async channel => {
     if (![APPLICATION_CHANNELS.STAFF, APPLICATION_CHANNELS.BUILDER, APPLICATION_CHANNELS.DEV].includes(channel.id)) return;
 
