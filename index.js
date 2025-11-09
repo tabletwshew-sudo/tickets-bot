@@ -350,27 +350,34 @@ const QUESTIONS = {
     ]
 };
 
-// SEND APPLICATION PANEL
-client.on('messageCreate', async message => {
-    if (message.content === '!apps' && message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        const embed = new EmbedBuilder()
-            .setTitle('Applications')
-            .setDescription('Apply for staff below!')
-            .setColor('#00FFFF');
+// SEND APPLICATION PANEL FUNCTION
+async function sendApplicationPanel() {
+    const channel = await client.channels.fetch(APPLICATION_PANEL_CHANNEL).catch(() => null);
+    if (!channel) return console.log("Application panel channel not found.");
 
-        const dropdown = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder()
-                .setCustomId('application_type_select')
-                .setPlaceholder('Select Application Type')
-                .addOptions([
-                    { label: 'Staff Application', value: 'staff_app' },
-                    { label: 'Builder Application', value: 'builder_app' },
-                    { label: 'Dev Application', value: 'dev_app' }
-                ])
-        );
+    const embed = new EmbedBuilder()
+        .setTitle('Applications')
+        .setDescription('Apply for staff below!')
+        .setColor('#00FFFF');
 
-        await message.channel.send({ embeds: [embed], components: [dropdown] });
-    }
+    const dropdown = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('application_type_select')
+            .setPlaceholder('Select Application Type')
+            .addOptions([
+                { label: 'Staff Application', value: 'staff_app' },
+                { label: 'Builder Application', value: 'builder_app' },
+                { label: 'Dev Application', value: 'dev_app' }
+            ])
+    );
+
+    await channel.send({ embeds: [embed], components: [dropdown] });
+}
+
+// BOT READY
+client.on('ready', async () => {
+    console.log(`Application Bot online as ${client.user.tag}`);
+    await sendApplicationPanel();
 });
 
 // HANDLE DROPDOWN SELECTION
@@ -526,7 +533,6 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.customId === 'open_ticket_app') {
-        // Open a DM thread for discussion
         member.send(`A staff member has opened a ticket with you regarding your application.`).catch(() => null);
         interaction.reply({ content: 'User has been notified in DMs.', ephemeral: true });
     }
@@ -583,7 +589,6 @@ client.on('channelDelete', async channel => {
 
     const transcriptChannel = channel.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
     if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
-}
-);
+});
 
 client.login(process.env.TOKEN);
