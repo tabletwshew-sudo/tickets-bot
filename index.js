@@ -298,29 +298,11 @@ client.on('interactionCreate', async interaction => {
    ===== TICKET BOT CODE ===
    ========================= */
 
+// APPLICATION BOT
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionsBitField } = require('discord.js');
+
 // CONFIG
-const STAFF_ROLE_ID = '1434722988602822762';
-const TICKET_CATEGORY_ID = '1434722990054051957';
-const PANEL_CHANNEL_ID = '1434722989571575984';
-const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
-
-// Load or create tickets.json
-let ticketsData;
-if (fs.existsSync('./tickets.json')) {
-    ticketsData = JSON.parse(fs.readFileSync('./tickets.json', 'utf8'));
-} else {
-    ticketsData = { lastTicket: 0 };
-    fs.writeFileSync('./tickets.json', JSON.stringify(ticketsData, null, 4));
-}
-
-// READY EVENT
-client.once('ready', async () => {
-    console.log(`Bot online as ${client.user.tag}`);
-});
-
-// =========================
-/* ===== APPLICATION BOT ==== */
-const APPLICATION_PANEL_CHANNEL = '1434722990054051958'; // panel channel
+const APPLICATION_PANEL_CHANNEL = '1434722990054051958';
 const APPLICATION_CHANNELS = {
     STAFF: '1434722990200721467',
     BUILDER: '1436543071654514800',
@@ -334,6 +316,7 @@ const ROLES = {
     DEV: '1434722988950818923'
 };
 
+const TRANSCRIPT_CHANNEL_ID = '1434722990360231967';
 const APPLICATION_TIMEOUT = 3 * 60 * 60 * 1000; // 3 hours
 
 const QUESTIONS = {
@@ -369,8 +352,7 @@ const QUESTIONS = {
 
 // SEND APPLICATION PANEL
 client.on('messageCreate', async message => {
-    if (!message.member || !message.member.permissions) return;
-    if (message.content === '!apps' && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    if (message.content === '!apps' && message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
         const embed = new EmbedBuilder()
             .setTitle('Applications')
             .setDescription('Apply for staff below!')
@@ -387,112 +369,89 @@ client.on('messageCreate', async message => {
                 ])
         );
 
-        message.channel.send({ embeds: [embed], components: [dropdown] });
+        await message.channel.send({ embeds: [embed], components: [dropdown] });
     }
 });
 
-// INTERACTION HANDLER (Dropdown, Buttons, Modals)
+// HANDLE DROPDOWN SELECTION
 client.on('interactionCreate', async interaction => {
-    try {
-        // === DROPDOWN ===
-        if (interaction.isStringSelectMenu()) {
-            if (interaction.customId === 'application_type_select') {
-                const type = interaction.values[0];
-                const dm = await interaction.user.send({
-                    embeds: [
-                        new EmbedBuilder()
-                            .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
-                            .setDescription(`Are you sure you want to apply? Once you start, I will send you a series of questions.\n\nYou have 3 hours to complete the application. Type 'cancel' to stop.`)
-                            .setColor('#00FFFF')
-                    ],
-                    components: [
-                        new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId('start_app').setLabel('Start Application').setStyle(ButtonStyle.Success),
-                            new ButtonBuilder().setCustomId('cancel_app').setLabel('Cancel Application').setStyle(ButtonStyle.Danger)
-                        )
-                    ]
-                }).catch(() => null);
+    if (!interaction.isStringSelectMenu()) return;
+    const type = interaction.values[0];
+    if (!['staff_app','builder_app','dev_app'].includes(type)) return;
 
-                if (!dm) return interaction.reply({ content: 'Cannot DM you. Please enable DMs.', ephemeral: true });
-                return interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
-            }
-        }
+    const dm = await interaction.user.send({
+        embeds: [
+            new EmbedBuilder()
+                .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
+                .setDescription(`Are you sure you want to apply? You have 3 hours to complete. Type 'cancel' to stop.`)
+                .setColor('#00FFFF')
+        ],
+        components: [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('start_app').setLabel('Start Application').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('cancel_app').setLabel('Cancel Application').setStyle(ButtonStyle.Danger)
+            )
+        ]
+    }).catch(() => null);
 
-        // === BUTTONS ===
-        if (interaction.isButton()) {
-            const embed = interaction.message.embeds[0];
-            if (!embed) return;
-
-            const type = embed.title.includes('Staff') ? 'staff_app' :
-                         embed.title.includes('Builder') ? 'builder_app' :
-                         embed.title.includes('Dev') ? 'dev_app' : '';
-
-            if (interaction.customId === 'cancel_app') {
-                return interaction.update({ content: 'Application cancelled. You can restart if this was a mistake.', components: [] });
-            }
-
-            if (interaction.customId === 'start_app') {
-                interaction.update({ content: 'Application started! Please answer the questions below. Type your answers as messages here.', components: [] });
-                startApplication(interaction.user, type);
-            }
-
-            // Application buttons (accept/deny)
-            if (['accept_app','close_app','accept_app_reason','close_app_reason','open_ticket_app'].includes(interaction.customId)) {
-                handleAppButtons(interaction, type);
-            }
-        }
-
-        // === MODALS ===
-        if (interaction.isModalSubmit()) {
-            if (interaction.customId.startsWith('accept_reason_modal|')) {
-                const [, userId, type] = interaction.customId.split('|');
-                const member = await interaction.guild.members.fetch(userId).catch(() => null);
-                if (!member) return;
-                const reason = interaction.fields.getTextInputValue('accept_reason_input');
-                handleAcceptance(member, type, interaction, reason);
-            }
-
-            if (interaction.customId.startsWith('deny_reason_modal|')) {
-                const [, userId, type] = interaction.customId.split('|');
-                const member = await interaction.guild.members.fetch(userId).catch(() => null);
-                if (!member) return;
-                const reason = interaction.fields.getTextInputValue('deny_reason_input');
-                handleDenial(member, type, interaction, reason);
-            }
-        }
-
-    } catch (err) { console.error(err); }
+    if (!dm) return interaction.reply({ content: 'Cannot DM this user. Please enable DMs.', ephemeral: true });
+    interaction.reply({ content: 'Check your DMs to start the application!', ephemeral: true });
 });
 
-// APPLICATION COLLECTOR
+// HANDLE START / CANCEL BUTTONS
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
+    const embed = interaction.message.embeds[0];
+    if (!embed) return;
+
+    const type = embed.title.includes('Staff') ? 'staff_app' :
+                 embed.title.includes('Builder') ? 'builder_app' :
+                 embed.title.includes('Dev') ? 'dev_app' : '';
+
+    if (interaction.customId === 'cancel_app') {
+        await interaction.update({ content: 'Application cancelled. You can restart if needed.', components: [] });
+        return;
+    }
+
+    if (interaction.customId === 'start_app') {
+        await interaction.update({ content: 'Application started! Answer the questions in this DM.', components: [] });
+        startApplication(interaction.user, type);
+    }
+});
+
+// APPLICATION MESSAGE COLLECTOR
 async function startApplication(user, type) {
     const questions = QUESTIONS[type];
     const answers = [];
     let index = 0;
+
     const dm = await user.createDM();
     dm.send(questions[index]);
 
     const filter = m => m.author.id === user.id;
     const collector = dm.createMessageCollector({ filter, time: APPLICATION_TIMEOUT });
 
-    collector.on('collect', async msg => {
-        if (msg.content.toLowerCase() === 'cancel') return collector.stop('cancelled');
+    collector.on('collect', msg => {
+        if (msg.content.toLowerCase() === 'cancel') {
+            collector.stop('cancelled');
+            return;
+        }
+
         answers.push(msg.content);
         index++;
-        if (index >= questions.length) return collector.stop('completed');
+        if (index >= questions.length) {
+            collector.stop('completed');
+            return;
+        }
         dm.send(questions[index]);
     });
 
-    collector.on('end', async (collected, reason) => {
-        if (reason === 'cancelled') {
-            dm.send('Your application has been cancelled.');
-            return;
-        }
+    collector.on('end', async (_, reason) => {
+        if (reason === 'cancelled') return dm.send('Application cancelled.');
 
         const channelId = type === 'staff_app' ? APPLICATION_CHANNELS.STAFF :
                           type === 'builder_app' ? APPLICATION_CHANNELS.BUILDER :
                           APPLICATION_CHANNELS.DEV;
-
         const staffChannel = await client.channels.fetch(channelId);
 
         const embed = new EmbedBuilder()
@@ -512,60 +471,89 @@ async function startApplication(user, type) {
             new ButtonBuilder().setCustomId('open_ticket_app').setLabel('Open Ticket With User').setStyle(ButtonStyle.Primary)
         );
 
-        staffChannel.send({ embeds: [embed], components: [buttons] });
-        dm.send('✅ Your application has been submitted.');
+        await staffChannel.send({ embeds: [embed], components: [buttons] });
+        await dm.send('✅ Your application has been submitted!');
     });
 }
 
-// BUTTON HANDLERS (ACCEPT/DENY/ROLE ASSIGNMENT)
-async function handleAppButtons(interaction, type) {
+// ACCEPT / DENY BUTTON HANDLERS
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton()) return;
     const embed = interaction.message.embeds[0];
     if (!embed) return;
+
     const username = embed.title.split("'s")[0];
     const guild = interaction.guild;
     const member = guild.members.cache.find(m => m.user.username === username);
-    if (!member) return interaction.reply({ content: 'User not found.', ephemeral: true });
+    if (!member) return interaction.reply({ content: 'User not found in guild.', ephemeral: true });
 
-    if (interaction.customId === 'accept_app') return handleAcceptance(member, type, interaction, '');
-    if (interaction.customId === 'close_app') return handleDenial(member, type, interaction, '');
+    const type = embed.title.includes('Staff') ? 'staff_app' :
+                 embed.title.includes('Builder') ? 'builder_app' :
+                 embed.title.includes('Dev') ? 'dev_app' : '';
+
+    // Accept / Deny
+    if (interaction.customId === 'accept_app') await handleAcceptance(member, type, interaction, '');
+    if (interaction.customId === 'close_app') await handleDenial(member, type, interaction, '');
+
+    // Accept / Deny with reason
     if (interaction.customId === 'accept_app_reason') {
-        return interaction.showModal(
+        await interaction.showModal(
             new ModalBuilder()
                 .setCustomId(`accept_reason_modal|${member.id}|${type}`)
                 .setTitle('Accept Application')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('accept_reason_input')
-                            .setLabel('Reason for acceptance')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    )
-                )
+                .addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('accept_reason_input')
+                        .setLabel('Reason for acceptance')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ))
         );
     }
     if (interaction.customId === 'close_app_reason') {
-        return interaction.showModal(
+        await interaction.showModal(
             new ModalBuilder()
                 .setCustomId(`deny_reason_modal|${member.id}|${type}`)
                 .setTitle('Deny Application')
-                .addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId('deny_reason_input')
-                            .setLabel('Reason for denial')
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    )
-                )
+                .addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('deny_reason_input')
+                        .setLabel('Reason for denial')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ))
         );
     }
 
     if (interaction.customId === 'open_ticket_app') {
-        return interaction.reply({ content: 'Ticket with user opened (integration required).', ephemeral: true });
+        // Open a DM thread for discussion
+        member.send(`A staff member has opened a ticket with you regarding your application.`).catch(() => null);
+        interaction.reply({ content: 'User has been notified in DMs.', ephemeral: true });
     }
-}
+});
 
+// HANDLE MODAL SUBMITS
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isModalSubmit()) return;
+
+    if (interaction.customId.startsWith('accept_reason_modal|')) {
+        const [, userId, type] = interaction.customId.split('|');
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member) return;
+        const reason = interaction.fields.getTextInputValue('accept_reason_input');
+        await handleAcceptance(member, type, interaction, reason);
+    }
+
+    if (interaction.customId.startsWith('deny_reason_modal|')) {
+        const [, userId, type] = interaction.customId.split('|');
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member) return;
+        const reason = interaction.fields.getTextInputValue('deny_reason_input');
+        await handleDenial(member, type, interaction, reason);
+    }
+});
+
+// HELPER FUNCTIONS
 async function handleAcceptance(member, type, interaction, reason) {
     const rolesToAdd = [];
     if (type === 'staff_app') rolesToAdd.push(ROLES.STAFF, ROLES.TRAINEE);
@@ -573,13 +561,29 @@ async function handleAcceptance(member, type, interaction, reason) {
     if (type === 'dev_app') rolesToAdd.push(ROLES.STAFF, ROLES.DEV);
 
     await member.roles.add(rolesToAdd).catch(() => null);
-    await member.send(`✅ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been accepted!${reason ? `\nReason: ${reason}` : ''}`);
+    await member.send(`✅ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been accepted!${reason ? `\nReason: ${reason}` : ''}`).catch(() => null);
     if (interaction.update) await interaction.update({ content: `Application accepted for ${member.user.tag}`, components: [] });
 }
 
 async function handleDenial(member, type, interaction, reason) {
-    await member.send(`❌ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been denied.${reason ? `\nReason: ${reason}` : ''}`);
+    await member.send(`❌ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been denied.${reason ? `\nReason: ${reason}` : ''}`).catch(() => null);
     if (interaction.update) await interaction.update({ content: `Application denied for ${member.user.tag}`, components: [] });
 }
+
+// AUTOMATIC LOGGING OF APPLICATION CHANNELS
+client.on('channelDelete', async channel => {
+    if (![APPLICATION_CHANNELS.STAFF, APPLICATION_CHANNELS.BUILDER, APPLICATION_CHANNELS.DEV].includes(channel.id)) return;
+
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const transcriptEmbed = new EmbedBuilder()
+        .setTitle('📄 Application Transcript')
+        .setDescription(`Transcript of <#${channel.id}>`)
+        .addFields({ name: 'Messages', value: messages.reverse().map(m => `${m.author.tag}: ${m.content}`).join('\n') || 'No messages' })
+        .setColor('#00FFFF');
+
+    const transcriptChannel = channel.guild.channels.cache.get(TRANSCRIPT_CHANNEL_ID);
+    if (transcriptChannel) transcriptChannel.send({ embeds: [transcriptEmbed] });
+}
+);
 
 client.login(process.env.TOKEN);
