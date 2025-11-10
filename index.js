@@ -513,46 +513,53 @@ client.on('interactionCreate', async interaction => {
 
             // Open ticket with user - create real ticket channel (reusing ticket channel creation)
             if (interaction.customId === 'open_ticket_app') {
-                // create a ticket channel for applicant
-                try {
-                    // increment ticket id same as ticket system
-                    ticketsData.lastTicket++;
-                    saveTickets();
-                    const ticketNumber = ticketsData.lastTicket;
-                    const guild = interaction.guild;
-                    const ticketChannel = await guild.channels.create({
-                        name: `Ticket-${ticketNumber}`,
-                        type: ChannelType.GuildText,
-                        parent: TICKET_CATEGORY_ID,
-                        permissionOverwrites: [
-                            { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
-                            { id: appEntry.userId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-                            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-                        ]
-                    });
+// create a ticket channel for applicant
+try {
+    // increment ticket id same as ticket system
+    ticketsData.lastTicket++;
+    saveTickets();
+    const ticketNumber = ticketsData.lastTicket;
+    const guild = interaction.guild;
+    const ticketChannel = await guild.channels.create({
+        name: `Ticket-${ticketNumber}`,
+        type: ChannelType.GuildText,
+        parent: TICKET_CATEGORY_ID,
+        permissionOverwrites: [
+            { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: appEntry.userId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+            { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
+    });
 
-                    const appEmbed = new EmbedBuilder()
-                        .setTitle(`Application Ticket: ${applicationId}`)
-                        .setDescription(`Application from <@${appEntry.userId}> (ID: ${applicationId})\nType: ${appEntry.type}`)
-                        .setColor('#00FFFF');
+    // Embed containing all application answers
+    const appEmbed = new EmbedBuilder()
+        .setTitle(`Application Ticket: ${applicationId}`)
+        .setDescription(`Application from <@${appEntry.userId}> (ID: ${applicationId})\nType: ${appEntry.type}`)
+        .setColor('#00FFFF')
+        .setFooter({ text: 'All answers are provided by the applicant.' })
+        .setTimestamp();
 
-                    // include application answers if stored (we attach them to entry)
-                    if (appEntry.answers) {
-                        for (let i = 0; i < appEntry.answers.length; i++) {
-                            appEmbed.addFields({ name: `${i + 1}. ${appEntry.questions[i]}`, value: appEntry.answers[i] || 'Skipped' });
-                        }
-                    }
+    // Add application answers as fields
+    if (appEntry.answers && appEntry.questions) {
+        for (let i = 0; i < appEntry.questions.length; i++) {
+            appEmbed.addFields({ 
+                name: `${i + 1}. ${appEntry.questions[i]}`, 
+                value: appEntry.answers[i] || 'User skipped this question.', 
+                inline: false 
+            });
+        }
+    }
 
-                    const closeRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
-                    );
+    const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+    );
 
-                    await ticketChannel.send({ embeds: [appEmbed], components: [closeRow] });
-                    await interaction.reply({ content: `Ticket created: ${ticketChannel}`, ephemeral: true });
-                } catch (err) {
-                    console.error('open_ticket_app error', err);
-                    await interaction.reply({ content: 'Failed to open ticket with applicant.', ephemeral: true });
-                }
+    await ticketChannel.send({ embeds: [appEmbed], components: [closeRow] });
+    await interaction.reply({ content: `Ticket created: ${ticketChannel}`, ephemeral: true });
+} catch (err) {
+    console.error('open_ticket_app error', err);
+    await interaction.reply({ content: 'Failed to open ticket with applicant.', ephemeral: true });
+}
                 return;
             }
         }
@@ -592,10 +599,22 @@ async function startApplication(user, type) {
         const answers = [];
         let index = 0;
 
-        // Create DM channel and start
+        // Create DM channel
         const dm = await user.createDM();
-        await dm.send(`Application started for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'}. You have 3 hours. Type 'cancel' to stop.`).catch(() => {});
-        await dm.send(questions[index]).catch(() => {});
+
+        // Start message embed
+        const startEmbed = new EmbedBuilder()
+            .setTitle(`${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} Application`)
+            .setDescription(`Your application has started! You have 3 hours to complete it. Type "cancel" to stop at any time.`)
+            .setColor('#00FFFF');
+
+        await dm.send({ embeds: [startEmbed] }).catch(() => {});
+
+        // Send first question as embed
+        await dm.send({ embeds: [new EmbedBuilder()
+            .setTitle(`Question ${index + 1}`)
+            .setDescription(questions[index])
+            .setColor('#00FFFF')] }).catch(() => {});
 
         const filter = m => m.author.id === user.id;
         const collector = dm.createMessageCollector({ filter, time: APPLICATION_TIMEOUT });
@@ -611,12 +630,24 @@ async function startApplication(user, type) {
                 collector.stop('completed');
                 return;
             }
-            try { await dm.send(questions[index]); } catch {}
+
+            // Send next question as embed
+            try {
+                await dm.send({ embeds: [new EmbedBuilder()
+                    .setTitle(`Question ${index + 1}`)
+                    .setDescription(questions[index])
+                    .setColor('#00FFFF')] });
+            } catch {}
         });
 
         collector.on('end', async (_, reason) => {
             if (reason === 'cancelled') {
-                try { await dm.send('Your application has been cancelled.'); } catch {}
+                try {
+                    await dm.send({ embeds: [new EmbedBuilder()
+                        .setTitle('Application Cancelled')
+                        .setDescription('Your application has been cancelled. You can restart anytime.')
+                        .setColor('#FF0000')] });
+                } catch {}
                 return;
             }
 
@@ -644,7 +675,7 @@ async function startApplication(user, type) {
                 .setColor('#00FFFF');
 
             for (let i = 0; i < questions.length; i++) {
-                embed.addFields({ name: `${i+1}. ${questions[i]}`, value: answers[i] || 'User skipped this question.' });
+                embed.addFields({ name: `${i + 1}. ${questions[i]}`, value: answers[i] || 'User skipped this question.' });
             }
 
             const buttons = new ActionRowBuilder().addComponents(
@@ -656,11 +687,23 @@ async function startApplication(user, type) {
             );
 
             if (staffChannel) staffChannel.send({ embeds: [embed], components: [buttons] }).catch(() => {});
-            try { await dm.send('✅ Your application has been submitted!'); } catch {}
+
+            // DM user confirmation as embed
+            try {
+                await dm.send({ embeds: [new EmbedBuilder()
+                    .setTitle('Application Submitted')
+                    .setDescription('✅ Your application has been successfully submitted! A staff member will review it shortly.')
+                    .setColor('#00FF00')] });
+            } catch {}
         });
     } catch (err) {
         console.error('startApplication error', err);
-        try { await user.send('An error occurred starting your application.'); } catch {}
+        try { 
+            await user.send({ embeds: [new EmbedBuilder()
+                .setTitle('Error')
+                .setDescription('An error occurred starting your application. Please try again later.')
+                .setColor('#FF0000')] });
+        } catch {}
     }
 }
 
@@ -668,66 +711,120 @@ async function startApplication(user, type) {
    ===== Accept / Deny helpers
    ========================= */
 async function handleAcceptanceByStaff(applicant, type, applicationId, interactionOrContext, reason) {
-    // role mapping (as you asked)
     try {
-        // fetch guild and member (interactionOrContext could be an interaction)
         const guild = interactionOrContext.guild || interactionOrContext.message?.guild;
-        const staffMemberTag = interactionOrContext.user?.tag || (interactionOrContext.user ? interactionOrContext.user.tag : 'Staff');
+        const staffTag = interactionOrContext.user?.tag || 'Staff';
 
-        if (!guild) {
-            // if called from modal submit in DM, just DM applicant
-            if (applicant) await applicant.send(`✅ Your application has been accepted!${reason ? `\nReason: ${reason}` : ''}`).catch(() => {});
-            if (interactionOrContext.update) await interactionOrContext.update({ content: `Application accepted by ${staffMemberTag}`, components: [] }).catch(() => {});
-            return;
+        // Add roles according to type
+        if (guild && applicant) {
+            const member = await guild.members.fetch(applicant.id).catch(() => null);
+            if (member) {
+                const toAdd = [];
+                if (type === 'staff_app') toAdd.push(ROLES.STAFF, ROLES.TRAINEE);
+                if (type === 'builder_app') toAdd.push(ROLES.STAFF, ROLES.BUILDER);
+                if (type === 'dev_app') toAdd.push(ROLES.STAFF, ROLES.DEV);
+
+                await member.roles.add(toAdd).catch(() => {});
+
+                // Remove conflicting roles
+                const remove = [];
+                if (type !== 'builder_app') remove.push(ROLES.BUILDER);
+                if (type !== 'dev_app') remove.push(ROLES.DEV);
+                if (type !== 'staff_app') remove.push(ROLES.TRAINEE);
+                await member.roles.remove(remove).catch(() => {});
+            }
         }
 
-        const member = await guild.members.fetch(applicant.id).catch(() => null);
-        if (member) {
-            // add roles according to type, and remove conflicting roles
-            const toAdd = [];
-            if (type === 'staff_app') toAdd.push(ROLES.STAFF, ROLES.TRAINEE);
-            if (type === 'builder_app') toAdd.push(ROLES.STAFF, ROLES.BUILDER);
-            if (type === 'dev_app') toAdd.push(ROLES.STAFF, ROLES.DEV);
+        // DM applicant with embed
+        if (applicant) {
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('Application Accepted ✅')
+                .setDescription(`Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been **accepted**!`)
+                .setColor('#00FF00');
 
-            await member.roles.add(toAdd).catch(() => {});
-            // remove roles that shouldn't stack
-            const remove = [];
-            if (type !== 'builder_app') remove.push(ROLES.BUILDER);
-            if (type !== 'dev_app') remove.push(ROLES.DEV);
-            if (type !== 'staff_app') remove.push(ROLES.TRAINEE);
-            await member.roles.remove(remove).catch(() => {});
+            if (reason) dmEmbed.addFields({ name: 'Reason', value: reason });
+
+            await applicant.send({ embeds: [dmEmbed] }).catch(() => {});
         }
 
-        // DM applicant
-        if (applicant) await applicant.send(`✅ Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been accepted!${reason ? `\nReason: ${reason}` : ''}`).catch(() => {});
-
-        // update staff message (interaction)
+        // Update staff message
         if (interactionOrContext.update) {
-            await interactionOrContext.update({ content: `Application accepted by ${interactionOrContext.user.tag}${reason ? `\nReason: ${reason}` : ''}`, components: [] }).catch(() => {});
-        } else if (interactionOrContext.reply) {
-            await interactionOrContext.reply({ content: `Application accepted by ${interactionOrContext.user.tag}`, ephemeral: true }).catch(() => {});
+            const staffEmbed = new EmbedBuilder()
+                .setTitle('Application Accepted')
+                .setDescription(`Application ID: ${applicationId}\nAccepted by: ${staffTag}`)
+                .setColor('#00FF00');
+            if (reason) staffEmbed.addFields({ name: 'Reason', value: reason });
+            await interactionOrContext.update({ embeds: [staffEmbed], components: [] }).catch(() => {});
         }
 
-        // log in transcript channel (application accepted)
+        // Log in transcript channel
         const logChannel = await client.channels.fetch(TRANSCRIPT_CHANNEL_ID).catch(() => null);
         if (logChannel) {
             const logEmbed = new EmbedBuilder()
                 .setTitle('Application Accepted')
-                .setDescription(`Application ID: ${applicationId}\nApplicant: ${applicant?.tag || 'Unknown'}\nBy: ${interactionOrContext.user.tag}`)
+                .setDescription(`Application ID: ${applicationId}\nApplicant: ${applicant?.tag || 'Unknown'}\nAccepted by: ${staffTag}`)
                 .addFields({ name: 'Type', value: type }, { name: 'Reason', value: reason || 'None' })
                 .setColor('#00FF00');
             logChannel.send({ embeds: [logEmbed] }).catch(() => {});
         }
 
-        // archive the application (move from active to archived)
+        // Archive application
         if (appsData.applications.activeApplications[applicationId]) {
             if (!appsData.archived) appsData.archived = {};
-            appsData.archived[applicationId] = Object.assign({}, appsData.applications.activeApplications[applicationId], { result: 'accepted', decidedBy: interactionOrContext.user.id, decidedAt: Date.now(), reason });
+            appsData.archived[applicationId] = Object.assign({}, appsData.applications.activeApplications[applicationId], { result: 'accepted', decidedBy: interactionOrContext.user?.id, decidedAt: Date.now(), reason });
             delete appsData.applications.activeApplications[applicationId];
             saveApps();
         }
+
     } catch (err) {
         console.error('handleAcceptanceByStaff error', err);
+    }
+}
+
+async function handleDenialByStaff(applicant, type, applicationId, interactionOrContext, reason) {
+    try {
+        // DM applicant with embed
+        if (applicant) {
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('Application Denied ❌')
+                .setDescription(`Your application for ${type === 'staff_app' ? 'Staff' : type === 'builder_app' ? 'Builder' : 'Dev'} has been **denied**.`)
+                .setColor('#FF0000');
+
+            if (reason) dmEmbed.addFields({ name: 'Reason', value: reason });
+            await applicant.send({ embeds: [dmEmbed] }).catch(() => {});
+        }
+
+        // Update staff message
+        if (interactionOrContext.update) {
+            const staffEmbed = new EmbedBuilder()
+                .setTitle('Application Denied')
+                .setDescription(`Application ID: ${applicationId}\nDenied by: ${interactionOrContext.user?.tag || 'Staff'}`)
+                .setColor('#FF0000');
+            if (reason) staffEmbed.addFields({ name: 'Reason', value: reason });
+            await interactionOrContext.update({ embeds: [staffEmbed], components: [] }).catch(() => {});
+        }
+
+        // Log in transcript channel
+        const logChannel = await client.channels.fetch(TRANSCRIPT_CHANNEL_ID).catch(() => null);
+        if (logChannel) {
+            const logEmbed = new EmbedBuilder()
+                .setTitle('Application Denied')
+                .setDescription(`Application ID: ${applicationId}\nApplicant: ${applicant?.tag || 'Unknown'}\nDenied by: ${interactionOrContext.user?.tag || 'Staff'}`)
+                .addFields({ name: 'Type', value: type }, { name: 'Reason', value: reason || 'None' })
+                .setColor('#FF0000');
+            logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+        }
+
+        // Archive application
+        if (appsData.applications.activeApplications[applicationId]) {
+            if (!appsData.archived) appsData.archived = {};
+            appsData.archived[applicationId] = Object.assign({}, appsData.applications.activeApplications[applicationId], { result: 'denied', decidedBy: interactionOrContext.user?.id, decidedAt: Date.now(), reason });
+            delete appsData.applications.activeApplications[applicationId];
+            saveApps();
+        }
+
+    } catch (err) {
+        console.error('handleDenialByStaff error', err);
     }
 }
 
